@@ -59,12 +59,9 @@ def get_etapa_da_jornada(intent):
         return "Sem Jornada Definida"
 
 def get_tipologia_sugerida(row):
-    """
-    Retorna a tipologia recomendada com base na Intent e nos SERP features,
-    conforme as regras fornecidas.
-    """
+    """Retorna a tipologia recomendada com base na Intent e nos SERP features."""
     intent = str(row.get('Intent', '')).strip().lower()
-    serp = str(row.get('SERP Features', '')).strip().lower()  # Note que aqui usamos 'SERP Features'
+    serp = str(row.get('SERP Features', '')).strip().lower()
     
     if intent == "informational":
         if "featured snippets" in serp:
@@ -124,6 +121,82 @@ def get_tipologia_sugerida(row):
         return "Análise Manual"
 
 # =============================================================================
+# Nova Função para Estratégia com Palavras-Chave
+# =============================================================================
+
+def criar_planilha_palavras_por_estrategia(folder_name, objective, combined_df):
+    """Gera a planilha com as estratégias de palavras-chave para cada objetivo, incluindo todas as palavras-chave."""
+    print_status("Criando a planilha 'Palavras por Estratégia.xlsx'...")
+    
+    # Definição das estratégias base
+    dados_estrategia = [
+        ["Captura de Leads", "Local SEO", "Melhor [serviço] em [cidade]", "Local Pack, Snippets", "Landing Page, Blog Local", "SEO Local + Conversão"],
+        ["Vendas no E-commerce", "Transactional", "Comprar [produto] com desconto", "Shopping Ads, Reviews", "Páginas de Produto, Comparativos", "CRO + SEO para Produtos"],
+        ["Mais Acessos", "Informational", "Como funciona [assunto]", "Featured Snippets, PAA", "Blog, Guia Completo", "SEO para Topo de Funil"],
+        ["Monetização com Adsense", "High CPC", "Melhor seguro de saúde nos EUA", "Featured Snippets, PAA", "Lista Comparativa, Blog", "SEO para Alto CPC"],
+        ["Branding/Autoridade", "Institucional", "[Empresa] é confiável?", "Knowledge Panel, Twitter Carousel", "Página Institucional, Blog", "SEO para Reputação"],
+        ["Outro", "Custom", "Personalizado conforme análise", "Variável", "Variável", "Definido pelo usuário"]
+    ]
+    
+    estrategia_base_df = pd.DataFrame(dados_estrategia, columns=["Objetivo", "Keyword Type", "Exemplo de Palavra-chave", "SERP Features", "Tipologia de Conteúdo", "Estratégia"])
+    
+    # Mapeamento do objetivo informado pelo usuário
+    objetivo_map = {
+        "1": "Captura de Leads",
+        "2": "Vendas no E-commerce",
+        "3": "Mais Acessos",
+        "4": "Monetização com Adsense",
+        "5": "Branding/Autoridade",
+        "6": "Outro"
+    }
+    objetivo_selecionado = objetivo_map.get(objective, "Outro") if objective in "123456" else objective.capitalize()
+
+    # Função para mapear palavras-chave aos objetivos
+    def mapear_objetivo(intent):
+        intent = str(intent).lower()
+        if "informational" in intent:
+            return "Mais Acessos"
+        elif "transactional" in intent or "transacional" in intent:
+            return "Vendas no E-commerce"
+        elif "commercial" in intent:
+            return "Captura de Leads"
+        elif "navegacional" in intent:
+            return "Branding/Autoridade"
+        else:
+            return "Outro"
+
+    # Adiciona as palavras-chave ao DataFrame
+    estrategia_df = combined_df.copy()
+    estrategia_df["Objetivo"] = estrategia_df["Intent"].apply(mapear_objetivo)
+    estrategia_df = estrategia_df.merge(estrategia_base_df.drop(columns=["Exemplo de Palavra-chave"]), 
+                                        on="Objetivo", how="left", suffixes=('', '_base'))
+
+    # Ajusta as colunas para incluir tudo possível
+    estrategia_df = estrategia_df.rename(columns={"Keyword": "Palavra-chave"})
+    colunas_finais = ["Objetivo", "Palavra-chave", "Volume", "Intent", "SERP Features", 
+                      "Keyword Type", "Tipologia de Conteúdo", "Estratégia"]
+    estrategia_df = estrategia_df[colunas_finais]
+
+    # Filtra pelo objetivo selecionado, se aplicável
+    if objetivo_selecionado != "Outro":
+        estrategia_df = estrategia_df[estrategia_df["Objetivo"] == objetivo_selecionado]
+
+    # Cria a planilha
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Palavras por Estratégia"
+    for r in dataframe_to_rows(estrategia_df, index=False, header=True):
+        ws.append(r)
+    
+    # Aplica mapa de calor na coluna Volume, se existir
+    volume_col_index = get_column_index(ws, "Volume")
+    if volume_col_index and not estrategia_df['Volume'].dropna().empty:
+        apply_heatmap(ws, volume_col_index, estrategia_df['Volume'].dropna().min(), estrategia_df['Volume'].dropna().max())
+
+    wb.save(os.path.join(folder_name, "Palavras por Estratégia.xlsx"))
+    print_status("Planilha 'Palavras por Estratégia.xlsx' criada com sucesso!")
+
+# =============================================================================
 # Configuração Inicial e Criação da Pasta de Saída
 # =============================================================================
 
@@ -134,7 +207,6 @@ print_status(f"Pasta de saída criada: {folder_name}")
 
 print_status("Bem-vindo ao Script de Análise de Palavras-Chave para SEO!")
 use_gpt = input("[PERGUNTA] Deseja conectar à API do ChatGPT para assistência? (s/n): ").lower()
-# Nesta versão usaremos o mapeamento interno para tipologia.
 if use_gpt == 's':
     print_status("A opção de API foi escolhida, mas este código usará o mapeamento interno para tipologia.")
 objective = input(
@@ -215,7 +287,6 @@ ws_serp_overview = wb_serp.active
 ws_serp_overview.title = "Visao Geral"
 for r in dataframe_to_rows(combined_df, index=False, header=True):
     ws_serp_overview.append(r)
-# Procura pela coluna SERP Features ignorando caixa (case insensitive)
 serp_col = None
 for col in combined_df.columns:
     if col.strip().lower() == "serp features":
@@ -223,14 +294,12 @@ for col in combined_df.columns:
         break
 
 if serp_col:
-    # Cria um conjunto com todos os tokens encontrados na coluna
     features_set = set()
     for val in combined_df[serp_col].dropna():
         for token in str(val).split(','):
             token = token.strip()
             if token:
                 features_set.add(token)
-    # Para cada feature encontrada, cria uma aba com os registros que contenham essa feature
     for feature in features_set:
         print_status(f"Criando aba para SERP Feature: {feature}")
         feature_df = combined_df[combined_df[serp_col].str.contains(feature, case=False, na=False)]
@@ -249,7 +318,6 @@ print_status("Passo 3 concluído: Planilha 'SERP Features.xlsx' gerada!")
 # =============================================================================
 
 print_status("Iniciando Passo 4: Mapeando por Jornada e Tipologia...")
-
 jornada_list = []
 tipologia_list = []
 for idx, row in combined_df.iterrows():
@@ -258,7 +326,6 @@ for idx, row in combined_df.iterrows():
 combined_df['Etapa da Jornada'] = jornada_list
 combined_df['Tipologia Sugerida'] = tipologia_list
 
-# Remove as colunas indesejadas, se existirem
 cols_to_drop = ["CPC (USD)", "Competitive Density", "Number of Results"]
 combined_df = combined_df.drop(columns=cols_to_drop, errors='ignore')
 
@@ -316,5 +383,13 @@ for r in dataframe_to_rows(ctr_export_df, index=False, header=True):
 ctr_filename = os.path.join(folder_name, "CTR por Posicao.xlsx")
 wb_ctr.save(ctr_filename)
 print_status("Passo 5 concluído: Planilha 'CTR por Posicao.xlsx' gerada!")
+
+# =============================================================================
+# Passo 6 – Estratégia por Objetivo com Palavras-Chave
+# =============================================================================
+
+print_status("Iniciando Passo 6: Gerando estratégias por objetivo com palavras-chave...")
+criar_planilha_palavras_por_estrategia(folder_name, objective, combined_df)
+print_status("Passo 6 concluído: Planilha 'Palavras por Estratégia.xlsx' gerada!")
 
 print_status("Análise concluída com sucesso! Verifique as planilhas na pasta " + folder_name)
