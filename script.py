@@ -72,7 +72,7 @@ def get_tipologia_sugerida(row):
         elif "instant answer" in serp:
             return "Artigo de Blog (respostas rápidas)"
         elif any(term in serp for term in ["video", "featured video", "video carousel"]):
-            return "Guia Iniciante com vídeo"
+            return "Guia"
         elif any(term in serp for term in ["image", "image pack"]):
             return "Infográfico"
         elif "people also ask" in serp:
