@@ -476,15 +476,73 @@ def criar_planilha_planejamento_crescimento(folder_name, combined_df, volume_atu
     return calculo_df, palavras_selecionadas, cauda_curta, cauda_media, cauda_longa, palavras_semantico, palavras_blog, meses, colunas_selecao
 
 # =============================================================================
+# Nova Função: Top 100 Palavras-Chave por Tipo
+# =============================================================================
+
+def criar_planilha_top_palavras_por_tipo(folder_name, combined_df):
+    print_status("Criando a planilha 'Top 100 Palavras por Tipo.xlsx'...")
+
+    # Identificar a coluna de volume
+    volume_col = None
+    for col in combined_df.columns:
+        if "volume" in col.lower():
+            volume_col = col
+            break
+    if not volume_col:
+        print_status("Erro: Nenhuma coluna de volume encontrada no DataFrame!")
+        return None
+
+    # Definir tipos de palavras-chave (exemplo: desentupidora, encanador, etc.)
+    tipos = {
+        "desentupidora": r"desentupidora|desentupimento",
+        "encanador": r"encanador|encanamento",
+        "eletricista": r"eletricista|elétrico|eletricidade",
+        "pedreiro": r"pedreiro|construção|obra",
+        "pintor": r"pintor|pintura",
+        "jardinagem": r"jardinagem|jardineiro|jardim",
+        "limpeza": r"limpeza|limpar",
+        "manutenção": r"manutenção|reparo|consertos",
+        "mudança": r"mudança|transporte|carreto",
+        "outros": r"^(?!.*(desentupidora|desentupimento|encanador|encanamento|eletricista|elétrico|eletricidade|pedreiro|construção|obra|pintor|pintura|jardinagem|jardineiro|jardim|limpeza|limpar|manutenção|reparo|consertos|mudança|transporte|carreto)).*$"
+    }
+
+    top_palavras = {}
+    for tipo, regex in tipos.items():
+        df_tipo = combined_df[combined_df["Keyword"].str.contains(regex, case=False, na=False, regex=True)]
+        if not df_tipo.empty:
+            top_palavras[tipo] = df_tipo.sort_values(by=volume_col, ascending=False).head(100)[["Keyword", volume_col, "Intent"]]
+
+    wb = Workbook()
+    for tipo, df in top_palavras.items():
+        ws = wb.create_sheet(tipo.capitalize())
+        for r in dataframe_to_rows(df, index=False, header=True):
+            ws.append(r)
+        volume_col_index = get_column_index(ws, volume_col)
+        if volume_col_index and not df[volume_col].dropna().empty:
+            apply_heatmap(ws, volume_col_index, df[volume_col])
+        apply_header_style(ws)
+        apply_content_style(ws)
+        adjust_column_width(ws)
+    
+    # Remover a aba padrão vazia
+    if "Sheet" in wb.sheetnames:
+        wb.remove(wb["Sheet"])
+    
+    wb.save(os.path.join(folder_name, "Top 100 Palavras por Tipo.xlsx"))
+    print_status("Planilha 'Top 100 Palavras por Tipo.xlsx' criada com sucesso!")
+    return top_palavras
+
+# =============================================================================
 # Configuração Inicial e Criação da Pasta de Saída
 # =============================================================================
 
+print_status("Bem-vindo ao Script de Análise de Palavras-Chave para SEO!")
+project_name = input("[PERGUNTA] Qual o nome do projeto? ").strip()
 now = datetime.now()
-folder_name = f"Analise {now.strftime('%d-%m-%Y')} {now.strftime('%H')} horas {now.strftime('%M')} minutos {now.strftime('%S')} segundos"
+folder_name = f"{project_name} {now.strftime('%d-%m-%Y')} {now.strftime('%H')} horas {now.strftime('%M')} minutos {now.strftime('%S')} segundos"
 os.makedirs(folder_name, exist_ok=True)
 print_status(f"Pasta de saída criada: {folder_name}")
 
-print_status("Bem-vindo ao Script de Análise de Palavras-Chave para SEO!")
 use_gpt = input("[PERGUNTA] Deseja conectar à API do ChatGPT para assistência? (s/n): ").lower()
 if use_gpt == 's':
     print_status("A opção de API foi escolhida, mas este código usará o mapeamento interno para tipologia.")
@@ -512,7 +570,7 @@ print_status(f"{len(cidades_brasil)} cidades carregadas para exclusão.")
 print_status("Iniciando Fase 1: Aglutinando planilhas...")
 all_data = []
 for filename in os.listdir(folder_path):
-    if filename.endswith('.xlsx') and not filename.startswith("Analise") and filename != "cidades_brasil.xlsx":
+    if filename.endswith('.xlsx') and not filename.startswith(project_name) and filename != "cidades_brasil.xlsx":
         print_status(f"Lendo arquivo: {filename}")
         try:
             df = pd.read_excel(os.path.join(folder_path, filename))
@@ -554,7 +612,21 @@ visao_geral_filename = os.path.join(folder_name, "Visao Geral de Palavras.xlsx")
 wb.save(visao_geral_filename)
 print_status("Fase 1 concluída: Planilha 'Visao Geral de Palavras.xlsx' gerada!")
 
-combined_df.to_excel(os.path.join(folder_name, "combined_df_temp.xlsx"), index=False)
+# Formatando combined_df_temp.xlsx
+print_status("Formatando a planilha temporária 'combined_df_temp.xlsx'...")
+wb_temp = Workbook()
+ws_temp = wb_temp.active
+ws_temp.title = "Dados Combinados Temporários"
+for r in dataframe_to_rows(combined_df, index=False, header=True):
+    ws_temp.append(r)
+volume_col_index = get_column_index(ws_temp, volume_col) if volume_col else None
+if volume_col_index and not combined_df[volume_col].dropna().empty:
+    apply_heatmap(ws_temp, volume_col_index, combined_df[volume_col])
+apply_header_style(ws_temp)
+apply_content_style(ws_temp)
+adjust_column_width(ws_temp)
+wb_temp.save(os.path.join(folder_name, "combined_df_temp.xlsx"))
+print_status("Planilha 'combined_df_temp.xlsx' formatada com sucesso!")
 
 plt.figure(figsize=(8, 4))
 top_10 = combined_df.head(10)
@@ -860,66 +932,88 @@ plt.savefig(os.path.join(folder_name, "crescimento.png"))
 plt.close()
 
 # =============================================================================
-# Geração do Relatório
+# Fase 8 – Top 100 Palavras por Tipo
 # =============================================================================
 
-print_status("Gerando Relatório.docx...")
+print_status("Iniciando Fase 8: Gerando top 100 palavras por tipo...")
+top_palavras_por_tipo = criar_planilha_top_palavras_por_tipo(folder_name, combined_df)
+print_status("Fase 8 concluída: Planilha 'Top 100 Palavras por Tipo.xlsx' gerada!")
+
+# =============================================================================
+# Geração do Relatório Analítico Detalhado
+# =============================================================================
+
+print_status("Gerando Relatório Analítico Detalhado.docx...")
 doc = Document()
 
-add_title(doc, "Relatório de Análise de Palavras-Chave para SEO")
+add_title(doc, f"Relatório Analítico Detalhado - Projeto {project_name}")
 
 add_subtitle(doc, "Introdução")
-add_paragraph(doc, "Este relatório apresenta uma análise detalhada das palavras-chave fornecidas, com o objetivo de otimizar a estratégia de SEO do seu site. Foram realizadas sete fases analíticas, cada uma com um propósito específico para entender o comportamento de busca, o potencial de tráfego e as oportunidades de conteúdo. Abaixo, detalhamos cada fase, os motivos de sua execução e os resultados obtidos.")
+add_paragraph(doc, f"Este relatório apresenta uma análise detalhada e fundamentada das palavras-chave fornecidas para o projeto {project_name}, com o objetivo de otimizar a estratégia de SEO do site. Foram realizadas oito fases analíticas, cada uma com propósitos específicos para compreender o comportamento de busca, o potencial de tráfego e as oportunidades de conteúdo. Abaixo, detalhamos cada fase, os métodos utilizados, os resultados obtidos e recomendações estratégicas.")
 
 add_subtitle(doc, "Fase 1: Visão Geral de Palavras")
-add_paragraph(doc, "Objetivo: Agregar todas as palavras-chave de diferentes fontes em uma única planilha para fornecer uma visão consolidada do volume de busca, intenção e características de SERP.")
-add_paragraph(doc, "Por que fizemos isso: A consolidação permite identificar padrões gerais, como palavras-chave de alto volume ou com baixa concorrência, servindo como base para as análises subsequentes.")
-add_paragraph(doc, f"Resultado: Foram analisadas {len(combined_df)} palavras-chave. Abaixo, o gráfico mostra as 10 principais por volume de busca.")
+add_paragraph(doc, "Objetivo: Consolidar todas as palavras-chave de diferentes fontes em uma única planilha para fornecer uma visão geral do volume de busca, intenção e características de SERP.")
+add_paragraph(doc, "Método: As planilhas foram lidas, concatenadas usando pandas e ordenadas pelo volume de busca (quando disponível). Uma versão temporária foi salva para depuração.")
+add_paragraph(doc, f"Resultado: Foram analisadas {len(combined_df)} palavras-chave únicas. O gráfico abaixo destaca as 10 principais por volume de busca.")
 add_image(doc, os.path.join(folder_name, "visao_geral.png"))
+add_paragraph(doc, "Recomendações: Priorizar palavras de alto volume para estratégias de curto prazo e explorar termos de cauda longa para ganhos sustentáveis.")
 
 add_subtitle(doc, "Fase 2: Separação por Intenção de Busca")
-add_paragraph(doc, "Objetivo: Classificar as palavras-chave em categorias de intenção (Informacional, Transacional, Comercial, Navegacional) para alinhar o conteúdo às expectativas dos usuários.")
-add_paragraph(doc, "Por que fizemos isso: Diferentes intenções requerem abordagens distintas de conteúdo, otimizando a conversão.")
-add_paragraph(doc, "Resultado: Distribuição das intenções encontrada nas palavras-chave.")
+add_paragraph(doc, "Objetivo: Classificar as palavras-chave em intenções de busca (Informacional, Transacional, Comercial, Navegacional) para alinhar o conteúdo às expectativas dos usuários.")
+add_paragraph(doc, "Método: Filtragem baseada na coluna 'Intent' com ordenação por volume.")
+add_paragraph(doc, f"Resultado: Distribuição das intenções: {', '.join([f'{intent}: {intent_counts.get(intent, 0)}' for intent in intents])}. Veja o gráfico abaixo.")
 add_image(doc, os.path.join(folder_name, "intents.png"))
+add_paragraph(doc, "Recomendações: Criar conteúdo específico para cada intenção, como guias para Informacional e páginas de produto para Transacional.")
 
 add_subtitle(doc, "Fase 3: Separação por Recursos de SERP")
-add_paragraph(doc, "Objetivo: Identificar palavras-chave associadas a recursos específicos da SERP (ex.: Snippets, Local Pack) para explorar oportunidades de destaque.")
-add_paragraph(doc, "Por que fizemos isso: Recursos de SERP aumentam a visibilidade e a taxa de cliques (CTR).")
-add_paragraph(doc, "Resultado: Quantidade de palavras por recurso principal.")
+add_paragraph(doc, "Objetivo: Identificar palavras-chave associadas a recursos de SERP para explorar oportunidades de visibilidade.")
+add_paragraph(doc, "Método: Extração e contagem de features da coluna 'SERP Features', com separação em abas.")
+add_paragraph(doc, f"Resultado: Principais recursos encontrados: {', '.join([f'{feat}: {count}' for feat, count in top_serp])}. Veja o gráfico.")
 add_image(doc, os.path.join(folder_name, "serp_features.png"))
+add_paragraph(doc, "Recomendações: Otimizar para Featured Snippets e Local Pack quando aplicável, aumentando CTR.")
 
 add_subtitle(doc, "Fase 4: Mapeamento por Jornada e Tipologia")
-add_paragraph(doc, "Objetivo: Mapear as palavras-chave às etapas da jornada do cliente e sugerir tipologias de conteúdo.")
-add_paragraph(doc, "Por que fizemos isso: Alinhar o conteúdo à jornada melhora a experiência do usuário e a eficácia do SEO.")
-add_paragraph(doc, "Resultado: Distribuição por etapa da jornada.")
+add_paragraph(doc, "Objetivo: Mapear palavras-chave às etapas da jornada do cliente e sugerir tipologias de conteúdo.")
+add_paragraph(doc, "Método: Uso de funções personalizadas para classificar intenções em etapas e sugerir tipologias baseadas em SERP Features.")
+add_paragraph(doc, f"Resultado: Distribuição por etapa: {', '.join([f'{etapa}: {jornada_counts.get(etapa, 0)}' for etapa in etapas])}. Veja o gráfico.")
 add_image(doc, os.path.join(folder_name, "jornada.png"))
+add_paragraph(doc, "Recomendações: Desenvolver funis de conteúdo alinhados à jornada, como blogs para Conscientização e comparativos para Consideração.")
 
 add_subtitle(doc, "Fase 5: CTR por Posição")
-add_paragraph(doc, "Objetivo: Calcular a estimativa de cliques (CTR) por posição no ranking para cada palavra-chave.")
-add_paragraph(doc, "Por que fizemos isso: Entender o impacto do posicionamento ajuda a definir metas de tráfego orgânico.")
+add_paragraph(doc, "Objetivo: Estimar cliques potenciais por posição no ranking para cada palavra-chave.")
+add_paragraph(doc, "Método: Aplicação de taxas de CTR padrão por posição ao volume de busca.")
 if not ctr_export_df.empty:
-    add_paragraph(doc, f"Resultado: Exemplo de CTR para '{exemplo_ctr['Keyword']}' com volume {exemplo_ctr[volume_col]}.")
+    add_paragraph(doc, f"Resultado: Exemplo para '{exemplo_ctr['Keyword']}' (volume {exemplo_ctr[volume_col]}). Veja a estimativa abaixo.")
     add_image(doc, os.path.join(folder_name, "ctr_posicao.png"))
+    add_paragraph(doc, "Recomendações: Focar em alcançar as primeiras posições para palavras de alto volume.")
 else:
-    add_paragraph(doc, "Resultado: Nenhuma análise de CTR devido à ausência de coluna de volume.")
+    add_paragraph(doc, "Resultado: Análise não realizada devido à ausência de dados de volume.")
 
 add_subtitle(doc, "Fase 6: Estratégia por Objetivo com Palavras-Chave")
-add_paragraph(doc, "Objetivo: Associar palavras-chave a estratégias específicas com tipologias de conteúdo e ações recomendadas.")
-add_paragraph(doc, "Por que fizemos isso: Personalizar a abordagem por objetivo maximiza os resultados desejados.")
-add_paragraph(doc, f"Resultado: Exemplo para '{estrategia_df.iloc[0]['Palavra-chave']}' com volume {estrategia_df.iloc[0]['Volume']}: Estratégia '{estrategia_df.iloc[0]['Estratégia']}', Tipologia '{estrategia_df.iloc[0]['Tipologia de Conteúdo']}'.")
+add_paragraph(doc, "Objetivo: Associar palavras-chave a estratégias específicas conforme o objetivo selecionado.")
+add_paragraph(doc, "Método: Mapeamento de intenções a objetivos e fusão com estratégias predefinidas.")
+add_paragraph(doc, f"Resultado: Para o objetivo '{objetivo_selecionado}', exemplo: '{estrategia_df.iloc[0]['Palavra-chave']}' (volume {estrategia_df.iloc[0]['Volume']}), Estratégia: '{estrategia_df.iloc[0]['Estratégia']}'.")
+add_paragraph(doc, "Recomendações: Implementar as tipologias sugeridas para maximizar o impacto do objetivo escolhido.")
 
 add_subtitle(doc, "Fase 7: Planejamento de Crescimento")
-add_paragraph(doc, "Objetivo: Projetar o crescimento de tráfego orgânico com base no volume atual, meta de crescimento, e palavras-chave trabalhadas por mês, excluindo termos geográficos.")
-add_paragraph(doc, "Por que fizemos isso: Fornece um plano acionável com metas mensais e priorização de palavras-chave.")
-add_paragraph(doc, f"Resultado: Projeção para {meses_planejamento} meses com volume inicial de {volume_atual} e crescimento de {crescimento_mensal}% ao mês.")
+add_paragraph(doc, "Objetivo: Projetar o crescimento de tráfego com base em volume atual, meta de crescimento e palavras-chave selecionadas.")
+add_paragraph(doc, "Método: Cálculo de metas com exclusão de termos geográficos e segmentação por cauda.")
+add_paragraph(doc, f"Resultado: Projeção para {meses_planejamento} meses, volume inicial {volume_atual}, crescimento {crescimento_mensal}% ao mês. Veja o gráfico.")
 add_image(doc, os.path.join(folder_name, "crescimento.png"))
+add_paragraph(doc, "Recomendações: Priorizar palavras selecionadas na aba 'Seleção de Palavras' e monitorar o progresso mensal.")
 
-add_subtitle(doc, "Conclusão")
-add_paragraph(doc, "A análise realizada oferece uma visão estratégica das palavras-chave, permitindo otimizar o conteúdo e planejar o crescimento do tráfego orgânico. Recomendamos implementar as tipologias sugeridas e priorizar as palavras-chave do planejamento de crescimento.")
+add_subtitle(doc, "Fase 8: Top 100 Palavras por Tipo")
+add_paragraph(doc, "Objetivo: Identificar as 100 melhores palavras-chave por tipo de serviço com base no volume de busca.")
+add_paragraph(doc, "Método: Filtragem por regex para tipos predefinidos (ex.: desentupidora, encanador) e ordenação por volume.")
+if top_palavras_por_tipo:
+    add_paragraph(doc, f"Resultado: Tipos analisados: {', '.join(top_palavras_por_tipo.keys())}. Exemplo para 'desentupidora': '{top_palavras_por_tipo.get('desentupidora', pd.DataFrame()).iloc[0]['Keyword']}' (volume {top_palavras_por_tipo.get('desentupidora', pd.DataFrame()).iloc[0][volume_col]})" if 'desentupidora' in top_palavras_por_tipo else "Nenhum resultado para 'desentupidora'.")
+    add_paragraph(doc, "Recomendações: Focar em palavras de alto volume por tipo para campanhas segmentadas.")
 
-doc.save(os.path.join(folder_name, "Relatório.docx"))
-print_status("Relatório.docx gerado com sucesso na pasta " + folder_name)
+add_subtitle(doc, "Conclusão e Recomendações Finais")
+add_paragraph(doc, f"A análise do projeto {project_name} oferece insights estratégicos para otimizar o SEO. Recomendamos: (1) Priorizar palavras de alto volume e baixa concorrência, (2) Implementar tipologias de conteúdo sugeridas, (3) Seguir o planejamento de crescimento para atingir as metas de tráfego, e (4) Monitorar os resultados regularmente para ajustes.")
+
+doc.save(os.path.join(folder_name, "Relatório Analítico Detalhado.docx"))
+print_status("Relatório Analítico Detalhado.docx gerado com sucesso na pasta " + folder_name)
 
 # =============================================================================
 # Geração do XML
@@ -979,7 +1073,8 @@ resultados = {
         "cauda_longa": {"count": len(cauda_longa), "exemplo": cauda_longa.head(1).to_dict(orient='records') if not cauda_longa.empty else []},
         "grupos_semanticos": palavras_semantico.groupby("Grupo Semântico").apply(lambda x: x[colunas_selecao].head(5).to_dict(orient='records')).to_dict() if not palavras_semantico.empty else {},
         "palavras_blog": palavras_blog.head(5).to_dict(orient='records') if not palavras_blog.empty else []
-    }
+    },
+    "Top_Palavras_por_Tipo": {tipo: df.to_dict(orient='records') for tipo, df in top_palavras_por_tipo.items()} if top_palavras_por_tipo else {}
 }
 
 root = dict_to_xml("Resultados", resultados)
