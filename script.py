@@ -1,7 +1,7 @@
 import pandas as pd
 import os
 from openpyxl import Workbook
-from openpyxl.styles import PatternFill, Font, Alignment
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 import time
@@ -18,6 +18,8 @@ import xml.etree.ElementTree as ET
 from xml.dom import minidom
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
+from openpyxl.chart import BarChart, PieChart, LineChart, Reference
+from openpyxl.chart.label import DataLabelList
 
 # =============================================================================
 # Funções Auxiliares
@@ -476,13 +478,12 @@ def criar_planilha_planejamento_crescimento(folder_name, combined_df, volume_atu
     return calculo_df, palavras_selecionadas, cauda_curta, cauda_media, cauda_longa, palavras_semantico, palavras_blog, meses, colunas_selecao
 
 # =============================================================================
-# Nova Função: Top 100 Palavras-Chave por Tipo
+# Função para Top 100 Palavras-Chave por Tipo
 # =============================================================================
 
 def criar_planilha_top_palavras_por_tipo(folder_name, combined_df):
     print_status("Criando a planilha 'Top 100 Palavras por Tipo.xlsx'...")
 
-    # Identificar a coluna de volume
     volume_col = None
     for col in combined_df.columns:
         if "volume" in col.lower():
@@ -492,7 +493,6 @@ def criar_planilha_top_palavras_por_tipo(folder_name, combined_df):
         print_status("Erro: Nenhuma coluna de volume encontrada no DataFrame!")
         return None
 
-    # Definir tipos de palavras-chave (exemplo: desentupidora, encanador, etc.)
     tipos = {
         "desentupidora": r"desentupidora|desentupimento",
         "encanador": r"encanador|encanamento",
@@ -524,13 +524,201 @@ def criar_planilha_top_palavras_por_tipo(folder_name, combined_df):
         apply_content_style(ws)
         adjust_column_width(ws)
     
-    # Remover a aba padrão vazia
     if "Sheet" in wb.sheetnames:
         wb.remove(wb["Sheet"])
     
     wb.save(os.path.join(folder_name, "Top 100 Palavras por Tipo.xlsx"))
     print_status("Planilha 'Top 100 Palavras por Tipo.xlsx' criada com sucesso!")
     return top_palavras
+
+# =============================================================================
+# Função para Criar Dashboard Profissional
+# =============================================================================
+
+def criar_dashboard_profissional(folder_name, combined_df, intent_counts, serp_counts, jornada_counts, ctr_export_df, estrategia_df, calculo_df, meses, volume_col, objective, now):
+    print_status("Criando Dashboard Profissional no Excel...")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Dashboard"
+
+    # Estilo para bordas e preenchimento
+    thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+    header_fill = PatternFill(start_color="000066", end_color="000066", fill_type="solid")
+    section_fill = PatternFill(start_color="E6F0FA", end_color="E6F0FA", fill_type="solid")
+
+    # --- Cabeçalho ---
+    ws['A1'] = "Dashboard de Análise de Palavras-Chave para SEO"
+    ws['A1'].font = Font(size=16, bold=True, color="FFFFFF")
+    ws['A1'].fill = header_fill
+    ws.merge_cells('A1:H1')
+    ws['A1'].alignment = Alignment(horizontal="center", vertical="center")
+
+    ws['A2'] = f"Data: {now.strftime('%d-%m-%Y %H:%M:%S')} | Objetivo: {objective}"
+    ws['A2'].font = Font(size=12, italic=True)
+    ws.merge_cells('A2:H2')
+
+    # --- Seção 1: Resumo Geral ---
+    ws['A4'] = "Resumo Geral"
+    ws['A4'].font = Font(size=14, bold=True)
+    ws['A4'].fill = section_fill
+    resumo_data = [
+        ["Total de Palavras", len(combined_df)],
+        ["Volume Médio", round(combined_df[volume_col].mean(), 2) if volume_col and not combined_df[volume_col].dropna().empty else "N/A"],
+        ["Palavras com Intent", len(combined_df[combined_df['Intent'].notna()])]
+    ]
+    for i, (label, value) in enumerate(resumo_data, start=5):
+        ws[f'A{i}'] = label
+        ws[f'B{i}'] = value
+        ws[f'A{i}'].font = Font(bold=True)
+        ws[f'B{i}'].alignment = Alignment(horizontal="center")
+        for col in ['A', 'B']:
+            ws[f'{col}{i}'].border = thin_border
+
+    # --- Seção 2: Distribuição por Intenção ---
+    ws['A10'] = "Distribuição por Intenção de Busca"
+    ws['A10'].font = Font(size=14, bold=True)
+    ws['A10'].fill = section_fill
+    intents = ['Informational', 'Transactional', 'Commercial', 'Navigational']
+    ws.append(["Intenção", "Quantidade"])
+    for intent in intents:
+        ws.append([intent, intent_counts.get(intent, 0)])
+    for row in range(11, 16):
+        for col in ['A', 'B']:
+            ws[f'{col}{row}'].border = thin_border
+    ws['A11'].font = Font(bold=True)
+    ws['B11'].font = Font(bold=True)
+
+    pie = PieChart()
+    labels = Reference(ws, min_col=1, min_row=12, max_row=15)
+    data = Reference(ws, min_col=2, min_row=11, max_row=15)
+    pie.add_data(data, titles_from_data=True)
+    pie.set_categories(labels)
+    pie.title = "Distribuição por Intenção"
+    pie.dataLabels = DataLabelList()
+    pie.dataLabels.showPercent = True
+    ws.add_chart(pie, "D10")
+
+    # --- Seção 3: Principais Recursos de SERP ---
+    ws['A20'] = "Principais Recursos de SERP"
+    ws['A20'].font = Font(size=14, bold=True)
+    ws['A20'].fill = section_fill
+    top_serp = sorted(serp_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+    ws.append(["Recurso", "Quantidade"])
+    for feature, count in top_serp:
+        ws.append([feature, count])
+    for row in range(21, 27):
+        for col in ['A', 'B']:
+            ws[f'{col}{row}'].border = thin_border
+    ws['A21'].font = Font(bold=True)
+    ws['B21'].font = Font(bold=True)
+
+    bar = BarChart()
+    data = Reference(ws, min_col=2, min_row=21, max_row=26)
+    cats = Reference(ws, min_col=1, min_row=22, max_row=26)
+    bar.add_data(data, titles_from_data=True)
+    bar.set_categories(cats)
+    bar.title = "Top 5 Recursos de SERP"
+    ws.add_chart(bar, "D20")
+
+    # --- Seção 4: Jornada do Cliente ---
+    ws['A30'] = "Distribuição por Jornada"
+    ws['A30'].font = Font(size=14, bold=True)
+    ws['A30'].fill = section_fill
+    etapas = ["Conscientização", "Consideração", "Decisão", "Fidelização"]
+    ws.append(["Etapa", "Quantidade"])
+    for etapa in etapas:
+        ws.append([etapa, jornada_counts.get(etapa, 0)])
+    for row in range(31, 36):
+        for col in ['A', 'B']:
+            ws[f'{col}{row}'].border = thin_border
+    ws['A31'].font = Font(bold=True)
+    ws['B31'].font = Font(bold=True)
+
+    pie_jornada = PieChart()
+    labels_j = Reference(ws, min_col=1, min_row=32, max_row=35)
+    data_j = Reference(ws, min_col=2, min_row=31, max_row=35)
+    pie_jornada.add_data(data_j, titles_from_data=True)
+    pie_jornada.set_categories(labels_j)
+    pie_jornada.title = "Distribuição por Jornada"
+    pie_jornada.dataLabels = DataLabelList()
+    pie_jornada.dataLabels.showPercent = True
+    ws.add_chart(pie_jornada, "D30")
+
+    # --- Seção 5: CTR por Posição ---
+    ws['A40'] = "CTR por Posição (Exemplo)"
+    ws['A40'].font = Font(size=14, bold=True)
+    ws['A40'].fill = section_fill
+    if not ctr_export_df.empty:
+        exemplo = ctr_export_df.iloc[0]
+        ws['A41'] = f"Palavra: {exemplo['Keyword']}"
+        ws.append(["Posição", "Cliques Mínimos", "Cliques Máximos"])
+        for pos in range(1, 11):
+            min_max = exemplo[f'Posicao {pos} ({int(ctr_rates[pos][0]*100)}%-{int(ctr_rates[pos][1]*100)}%)'].split('-')
+            ws.append([f"Posição {pos}", int(min_max[0]), int(min_max[1])])
+        for row in range(41, 53):
+            for col in ['A', 'B', 'C']:
+                ws[f'{col}{row}'].border = thin_border
+        ws['A42'].font = Font(bold=True)
+        ws['B42'].font = Font(bold=True)
+        ws['C42'].font = Font(bold=True)
+
+        line = LineChart()
+        data_c = Reference(ws, min_col=2, min_row=42, max_col=3, max_row=52)
+        cats_c = Reference(ws, min_col=1, min_row=43, max_row=52)
+        line.add_data(data_c, titles_from_data=True)
+        line.set_categories(cats_c)
+        line.title = f"CTR para '{exemplo['Keyword']}'"
+        line.y_axis.title = "Cliques"
+        line.x_axis.title = "Posição"
+        ws.add_chart(line, "D40")
+
+    # --- Seção 6: Estratégia por Objetivo ---
+    ws['A55'] = "Estratégia por Objetivo (Top 5)"
+    ws['A55'].font = Font(size=14, bold=True)
+    ws['A55'].fill = section_fill
+    ws.append(["Palavra-chave", "Volume", "Estratégia", "Tipologia"])
+    for _, row in estrategia_df.head(5).iterrows():
+        ws.append([row["Palavra-chave"], row["Volume"], row["Estratégia"], row["Tipologia de Conteúdo"]])
+    for row in range(56, 62):
+        for col in ['A', 'B', 'C', 'D']:
+            ws[f'{col}{row}'].border = thin_border
+    for col in ['A', 'B', 'C', 'D']:
+        ws[f'{col}56'].font = Font(bold=True)
+
+    # --- Seção 7: Planejamento de Crescimento ---
+    ws['A65'] = "Projeção de Crescimento"
+    ws['A65'].font = Font(size=14, bold=True)
+    ws['A65'].fill = section_fill
+    volume_atual = calculo_df[calculo_df["Métrica"] == "Volume Atual (mensal)"]["Valor"].iloc[0]
+    crescimento_mensal = calculo_df[calculo_df["Métrica"] == "Crescimento Desejado (%)"]["Valor"].iloc[0]
+    meses_planejamento = int(calculo_df[calculo_df["Métrica"] == "Meses de Planejamento"]["Valor"].iloc[0])
+    acessos = [volume_atual * (1 + crescimento_mensal / 100) ** i for i in range(meses_planejamento)]
+    ws.append(["Mês", "Acessos Projetados"])
+    for i, acesso in enumerate(acessos, start=1):
+        ws.append([f"Mês {i}", round(acesso)])
+    for row in range(66, 66 + meses_planejamento + 1):
+        for col in ['A', 'B']:
+            ws[f'{col}{row}'].border = thin_border
+    ws['A66'].font = Font(bold=True)
+    ws['B66'].font = Font(bold=True)
+
+    line_c = LineChart()
+    data_c = Reference(ws, min_col=2, min_row=66, max_row=66 + meses_planejamento)
+    cats_c = Reference(ws, min_col=1, min_row=67, max_row=66 + meses_planejamento)
+    line_c.add_data(data_c, titles_from_data=True)
+    line_c.set_categories(cats_c)
+    line_c.title = "Projeção de Crescimento"
+    line_c.y_axis.title = "Acessos Mensais"
+    line_c.x_axis.title = "Meses"
+    ws.add_chart(line_c, "D65")
+
+    # Ajustar largura das colunas
+    adjust_column_width(ws)
+
+    # Salvar o dashboard
+    wb.save(os.path.join(folder_name, "Dashboard.xlsx"))
+    print_status("Dashboard.xlsx gerado com sucesso!")
 
 # =============================================================================
 # Configuração Inicial e Criação da Pasta de Saída
@@ -612,7 +800,6 @@ visao_geral_filename = os.path.join(folder_name, "Visao Geral de Palavras.xlsx")
 wb.save(visao_geral_filename)
 print_status("Fase 1 concluída: Planilha 'Visao Geral de Palavras.xlsx' gerada!")
 
-# Formatando combined_df_temp.xlsx
 print_status("Formatando a planilha temporária 'combined_df_temp.xlsx'...")
 wb_temp = Workbook()
 ws_temp = wb_temp.active
@@ -940,6 +1127,14 @@ top_palavras_por_tipo = criar_planilha_top_palavras_por_tipo(folder_name, combin
 print_status("Fase 8 concluída: Planilha 'Top 100 Palavras por Tipo.xlsx' gerada!")
 
 # =============================================================================
+# Fase 9 – Geração do Dashboard Profissional
+# =============================================================================
+
+print_status("Iniciando Fase 9: Gerando Dashboard Profissional...")
+criar_dashboard_profissional(folder_name, combined_df, intent_counts, serp_counts, jornada_counts, ctr_export_df, estrategia_df, calculo_df, meses, volume_col, objective, now)
+print_status("Fase 9 concluída: Dashboard.xlsx gerado!")
+
+# =============================================================================
 # Geração do Relatório Analítico Detalhado
 # =============================================================================
 
@@ -949,7 +1144,7 @@ doc = Document()
 add_title(doc, f"Relatório Analítico Detalhado - Projeto {project_name}")
 
 add_subtitle(doc, "Introdução")
-add_paragraph(doc, f"Este relatório apresenta uma análise detalhada e fundamentada das palavras-chave fornecidas para o projeto {project_name}, com o objetivo de otimizar a estratégia de SEO do site. Foram realizadas oito fases analíticas, cada uma com propósitos específicos para compreender o comportamento de busca, o potencial de tráfego e as oportunidades de conteúdo. Abaixo, detalhamos cada fase, os métodos utilizados, os resultados obtidos e recomendações estratégicas.")
+add_paragraph(doc, f"Este relatório apresenta uma análise detalhada e fundamentada das palavras-chave fornecidas para o projeto {project_name}, com o objetivo de otimizar a estratégia de SEO do site. Foram realizadas nove fases analíticas, cada uma com propósitos específicos para compreender o comportamento de busca, o potencial de tráfego e as oportunidades de conteúdo. Abaixo, detalhamos cada fase, os métodos utilizados, os resultados obtidos e recomendações estratégicas.")
 
 add_subtitle(doc, "Fase 1: Visão Geral de Palavras")
 add_paragraph(doc, "Objetivo: Consolidar todas as palavras-chave de diferentes fontes em uma única planilha para fornecer uma visão geral do volume de busca, intenção e características de SERP.")
@@ -1009,8 +1204,14 @@ if top_palavras_por_tipo:
     add_paragraph(doc, f"Resultado: Tipos analisados: {', '.join(top_palavras_por_tipo.keys())}. Exemplo para 'desentupidora': '{top_palavras_por_tipo.get('desentupidora', pd.DataFrame()).iloc[0]['Keyword']}' (volume {top_palavras_por_tipo.get('desentupidora', pd.DataFrame()).iloc[0][volume_col]})" if 'desentupidora' in top_palavras_por_tipo else "Nenhum resultado para 'desentupidora'.")
     add_paragraph(doc, "Recomendações: Focar em palavras de alto volume por tipo para campanhas segmentadas.")
 
+add_subtitle(doc, "Fase 9: Dashboard Profissional")
+add_paragraph(doc, "Objetivo: Criar um dashboard interativo no Excel para visualização consolidada dos principais insights.")
+add_paragraph(doc, "Método: Geração de tabelas e gráficos (pizza, barras e linhas) com dados de intenções, SERP, jornada, CTR e crescimento.")
+add_paragraph(doc, "Resultado: Dashboard gerado em 'Dashboard.xlsx', contendo resumo geral, distribuições e projeções.")
+add_paragraph(doc, "Recomendações: Utilizar o dashboard para apresentações e monitoramento estratégico.")
+
 add_subtitle(doc, "Conclusão e Recomendações Finais")
-add_paragraph(doc, f"A análise do projeto {project_name} oferece insights estratégicos para otimizar o SEO. Recomendamos: (1) Priorizar palavras de alto volume e baixa concorrência, (2) Implementar tipologias de conteúdo sugeridas, (3) Seguir o planejamento de crescimento para atingir as metas de tráfego, e (4) Monitorar os resultados regularmente para ajustes.")
+add_paragraph(doc, f"A análise do projeto {project_name} oferece insights estratégicos para otimizar o SEO. Recomendamos: (1) Priorizar palavras de alto volume e baixa concorrência, (2) Implementar tipologias de conteúdo sugeridas, (3) Seguir o planejamento de crescimento para atingir as metas de tráfego, e (4) Monitorar os resultados regularmente com o dashboard gerado.")
 
 doc.save(os.path.join(folder_name, "Relatório Analítico Detalhado.docx"))
 print_status("Relatório Analítico Detalhado.docx gerado com sucesso na pasta " + folder_name)
