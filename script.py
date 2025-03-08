@@ -66,12 +66,12 @@ def apply_heatmap(ws, column_idx, values):
     values = pd.Series(values).dropna().sort_values()
     if values.empty:
         return
-    
+
     total = len(values)
     red_threshold = int(total * 0.25)
     orange_threshold = int(total * 0.55)
     yellow_threshold = int(total * 0.85)
-    
+
     red_max = values.iloc[red_threshold - 1] if red_threshold > 0 else values.min()
     orange_max = values.iloc[orange_threshold - 1] if orange_threshold > 0 else values.min()
     yellow_max = values.iloc[yellow_threshold - 1] if yellow_threshold > 0 else values.min()
@@ -176,7 +176,7 @@ def get_etapa_da_jornada(intent):
 def get_tipologia_sugerida(row):
     intent = str(row.get('Intent', '')).strip().lower()
     serp = str(row.get('SERP Features', '')).strip().lower()
-    
+
     if intent == "informational":
         if "featured snippets" in serp:
             return "Artigo de Blog"
@@ -240,7 +240,7 @@ def get_tipologia_sugerida(row):
 
 def criar_planilha_palavras_por_estrategia(folder_name, objective, combined_df):
     print_status("Criando a planilha 'Palavras por Estratégia.xlsx'...")
-    
+
     dados_estrategia = [
         ["Captura de Leads", "Local SEO", "Melhor [serviço] em [cidade]", "Local Pack, Snippets", "Landing Page, Blog Local", "SEO Local + Conversão"],
         ["Vendas no E-commerce", "Transactional", "Comprar [produto] com desconto", "Shopping Ads, Reviews", "Páginas de Produto, Comparativos", "CRO + SEO para Produtos"],
@@ -249,9 +249,9 @@ def criar_planilha_palavras_por_estrategia(folder_name, objective, combined_df):
         ["Branding/Autoridade", "Institucional", "[Empresa] é confiável?", "Knowledge Panel, Twitter Carousel", "Página Institucional, Blog", "SEO para Reputação"],
         ["Outro", "Custom", "Personalizado conforme análise", "Variável", "Variável", "Definido pelo usuário"]
     ]
-    
+
     estrategia_base_df = pd.DataFrame(dados_estrategia, columns=["Objetivo", "Keyword Type", "Exemplo de Palavra-chave", "SERP Features", "Tipologia de Conteúdo", "Estratégia"])
-    
+
     objetivo_map = {
         "1": "Captura de Leads",
         "2": "Vendas no E-commerce",
@@ -264,11 +264,11 @@ def criar_planilha_palavras_por_estrategia(folder_name, objective, combined_df):
 
     estrategia_df = combined_df.copy()
     estrategia_df["Objetivo"] = estrategia_df["Intent"].apply(mapear_objetivo)
-    estrategia_df = estrategia_df.merge(estrategia_base_df.drop(columns=["Exemplo de Palavra-chave"]), 
+    estrategia_df = estrategia_df.merge(estrategia_base_df.drop(columns=["Exemplo de Palavra-chave"]),
                                         on="Objetivo", how="left", suffixes=('', '_base'))
 
     estrategia_df = estrategia_df.rename(columns={"Keyword": "Palavra-chave"})
-    colunas_finais = ["Objetivo", "Palavra-chave", "Volume", "Intent", "SERP Features", 
+    colunas_finais = ["Objetivo", "Palavra-chave", "Volume", "Intent", "SERP Features",
                       "Keyword Type", "Tipologia de Conteúdo", "Estratégia"]
     estrategia_df = estrategia_df[colunas_finais]
 
@@ -280,7 +280,7 @@ def criar_planilha_palavras_por_estrategia(folder_name, objective, combined_df):
     ws.title = "Palavras por Estratégia"
     for r in dataframe_to_rows(estrategia_df, index=False, header=True):
         ws.append(r)
-    
+
     volume_col_index = get_column_index(ws, "Volume")
     if volume_col_index and not estrategia_df['Volume'].dropna().empty:
         apply_heatmap(ws, volume_col_index, estrategia_df['Volume'])
@@ -337,19 +337,17 @@ def criar_planilha_planejamento_crescimento(folder_name, combined_df, volume_atu
     if objetivo_selecionado != "Outro":
         palavras_df = palavras_df[palavras_df["Objetivo"] == objetivo_selecionado]
 
-    palavras_df["Keyword"] = palavras_df["Keyword"].fillna("")
+    palavras_df["Keyword"] = palavras_df["Keyword"].fillna("").astype(str)
 
+    # Filtro de cidades menos restritivo (apenas palavras exatas de cidades)
     palavras_df = palavras_df[~palavras_df["Keyword"].str.lower().apply(
-        lambda x: any(re.search(r'\b' + re.escape(cidade) + r'\b', x) for cidade in cidades_brasil) or 
-                  bool(re.search(r'\b(em|no|na|de)\s+[a-záéíóúâêîôûãõç]+$', x, re.IGNORECASE)) or
-                  bool(re.search(r'\b[a-z]{2,3}\b', x, re.IGNORECASE))
+        lambda x: any(cidade in x.split() for cidade in cidades_brasil)
     )]
 
     print_status(f"Linhas após filtro de cidades: {len(palavras_df)}")
     if palavras_df.empty:
         print_status("Aviso: O DataFrame está vazio após o filtro de cidades!")
-    else:
-        print_status(f"Colunas disponíveis: {list(palavras_df.columns)}")
+        return None, None, None, None, None, None, None, None
 
     volume_col = None
     for col in palavras_df.columns:
@@ -380,26 +378,32 @@ def criar_planilha_planejamento_crescimento(folder_name, combined_df, volume_atu
         mes_df = palavras_selecionadas.iloc[inicio:fim][colunas_selecao]
         meses.append(mes_df)
 
-    palavras_df["Comprimento"] = palavras_df["Keyword"].apply(lambda x: len(str(x).split()))
+    # Segmentação por comprimento
+    palavras_df["Comprimento"] = palavras_df["Keyword"].apply(lambda x: len(str(x).strip().split()))
     cauda_curta = palavras_df[palavras_df["Comprimento"] <= 2][colunas_selecao]
     cauda_media = palavras_df[palavras_df["Comprimento"] == 3][colunas_selecao]
     cauda_longa = palavras_df[palavras_df["Comprimento"] >= 4][colunas_selecao]
 
-    total_grupos = palavras_por_mes // 2
-    total_palavras_semantico = total_grupos * 10
-    palavras_semantico = palavras_df.head(total_palavras_semantico)
+    # Grupos Semânticos
+    total_grupos = max(2, palavras_por_mes // 2)  # Garantir pelo menos 2 grupos
+    total_palavras_semantico = min(len(palavras_df), total_grupos * 20)  # Aumentar para 20 por grupo
+    palavras_semantico = palavras_df.head(total_palavras_semantico).copy()  # Criar uma cópia explícita
     if len(palavras_semantico) >= 10:
-        vectorizer = TfidfVectorizer()
+        vectorizer = TfidfVectorizer(max_features=5000, stop_words=None)
         X = vectorizer.fit_transform(palavras_semantico["Keyword"])
-        kmeans = KMeans(n_clusters=total_grupos, random_state=42)
-        palavras_semantico["Grupo Semântico"] = kmeans.fit_predict(X).astype(str)
-        palavras_semantico["Grupo Semântico"] = "Grupo " + palavras_semantico["Grupo Semântico"]
+        kmeans = KMeans(n_clusters=total_grupos, n_init=10, random_state=42)  # Adicionar n_init=10
+        palavras_semantico["Grupo Semântico"] = kmeans.fit_predict(X).astype(str)  # Usar atribuição direta
+        palavras_semantico["Grupo Semântico"] = "Grupo_" + palavras_semantico["Grupo Semântico"]
     else:
         palavras_semantico["Grupo Semântico"] = "Sem Grupo (poucas palavras)"
     colunas_semantico = ["Grupo Semântico"] + colunas_selecao
 
+    # Palavras para Blog (informacionais)
     palavras_blog = palavras_df[palavras_df["Intent"].str.lower().str.contains("informational", na=False)][colunas_selecao]
+    if palavras_blog.empty:
+        print_status("Aviso: Nenhuma palavra informacional encontrada para blog!")
 
+    # Criação da planilha
     wb = Workbook()
 
     ws_calculo = wb.active
@@ -484,6 +488,7 @@ def criar_planilha_planejamento_crescimento(folder_name, combined_df, volume_atu
 def criar_planilha_top_palavras_por_tipo(folder_name, combined_df):
     print_status("Criando a planilha 'Top 100 Palavras por Tipo.xlsx'...")
 
+    # Identificar a coluna de volume dinamicamente
     volume_col = None
     for col in combined_df.columns:
         if "volume" in col.lower():
@@ -493,28 +498,62 @@ def criar_planilha_top_palavras_por_tipo(folder_name, combined_df):
         print_status("Erro: Nenhuma coluna de volume encontrada no DataFrame!")
         return None
 
-    tipos = {
-        "desentupidora": r"desentupidora|desentupimento",
-        "encanador": r"encanador|encanamento",
-        "eletricista": r"eletricista|elétrico|eletricidade",
-        "pedreiro": r"pedreiro|construção|obra",
-        "pintor": r"pintor|pintura",
-        "jardinagem": r"jardinagem|jardineiro|jardim",
-        "limpeza": r"limpeza|limpar",
-        "manutenção": r"manutenção|reparo|consertos",
-        "mudança": r"mudança|transporte|carreto",
-        "outros": r"^(?!.*(desentupidora|desentupimento|encanador|encanamento|eletricista|elétrico|eletricidade|pedreiro|construção|obra|pintor|pintura|jardinagem|jardineiro|jardim|limpeza|limpar|manutenção|reparo|consertos|mudança|transporte|carreto)).*$"
-    }
+    # Garantir que "Keyword" seja string e tratar valores nulos
+    combined_df["Keyword"] = combined_df["Keyword"].fillna("").astype(str)
+
+    # Filtrar palavras com volume válido
+    df_valid = combined_df[combined_df[volume_col].notna() & (combined_df[volume_col] > 0)].copy().reset_index(drop=True)
+    if len(df_valid) < 1:
+        print_status("Erro: Nenhuma palavra com volume válido encontrada!")
+        return None
+
+    # Verificar se existe uma coluna para agrupar tipos (ex.: "Keyword Type", "Categoria", etc.)
+    type_col = None
+    for col in df_valid.columns:
+        if "type" in col.lower() or "categoria" in col.lower() or "grupo" in col.lower():
+            type_col = col
+            break
 
     top_palavras = {}
-    for tipo, regex in tipos.items():
-        df_tipo = combined_df[combined_df["Keyword"].str.contains(regex, case=False, na=False, regex=True)]
-        if not df_tipo.empty:
-            top_palavras[tipo] = df_tipo.sort_values(by=volume_col, ascending=False).head(100)[["Keyword", volume_col, "Intent"]]
+    if type_col:
+        # Agrupar por tipo fornecido na coluna identificada
+        print_status(f"Agrupando palavras por '{type_col}' fornecido na planilha...")
+        for tipo in df_valid[type_col].dropna().unique():
+            tipo_df = df_valid[df_valid[type_col] == tipo].sort_values(by=volume_col, ascending=False)
+            if not tipo_df.empty:
+                # Garantir que o nome do tipo tenha menos de 31 caracteres (limite do Excel)
+                tipo_name = str(tipo)[:31]
+                top_palavras[tipo_name] = tipo_df.head(100)[["Keyword", volume_col, "Intent"]]
+    else:
+        # Fallback: usar clustering TF-IDF se não houver coluna de tipo
+        print_status("Nenhuma coluna de tipo encontrada. Usando clustering automático como fallback...")
+        if len(df_valid) >= 10:
+            vectorizer = TfidfVectorizer(max_features=5000, stop_words=None)
+            X = vectorizer.fit_transform(df_valid["Keyword"])
+            feature_names = vectorizer.get_feature_names_out()
+            n_clusters = min(10, max(2, len(df_valid) // 100))
+            kmeans = KMeans(n_clusters=n_clusters, n_init=10, random_state=42)
+            df_valid["Cluster"] = kmeans.fit_predict(X)
 
+            for cluster_id in range(n_clusters):
+                cluster_df = df_valid[df_valid["Cluster"] == cluster_id].sort_values(by=volume_col, ascending=False)
+                if not cluster_df.empty:
+                    cluster_indices = df_valid.index[df_valid["Cluster"] == cluster_id].tolist()
+                    cluster_tfidf = X[cluster_indices].mean(axis=0).A1
+                    top_indices = cluster_tfidf.argsort()[-2:][::-1]
+                    top_terms = [feature_names[idx] for idx in top_indices]
+                    cluster_name = " ".join(top_terms).capitalize()[:31]
+                    if cluster_name in top_palavras:
+                        cluster_name = f"{cluster_name} {cluster_id}"[:31]
+                    top_palavras[cluster_name] = cluster_df.head(100)[["Keyword", volume_col, "Intent"]]
+        else:
+            print_status("Menos de 10 palavras válidas. Agrupando todas em 'Geral'...")
+            top_palavras["Geral"] = df_valid.sort_values(by=volume_col, ascending=False).head(100)[["Keyword", volume_col, "Intent"]]
+
+    # Criar a planilha com os grupos
     wb = Workbook()
     for tipo, df in top_palavras.items():
-        ws = wb.create_sheet(tipo.capitalize())
+        ws = wb.create_sheet(tipo)  # Nome da aba será o tipo identificado
         for r in dataframe_to_rows(df, index=False, header=True):
             ws.append(r)
         volume_col_index = get_column_index(ws, volume_col)
@@ -523,19 +562,156 @@ def criar_planilha_top_palavras_por_tipo(folder_name, combined_df):
         apply_header_style(ws)
         apply_content_style(ws)
         adjust_column_width(ws)
-    
+
     if "Sheet" in wb.sheetnames:
         wb.remove(wb["Sheet"])
-    
+
     wb.save(os.path.join(folder_name, "Top 100 Palavras por Tipo.xlsx"))
     print_status("Planilha 'Top 100 Palavras por Tipo.xlsx' criada com sucesso!")
     return top_palavras
+# =============================================================================
+# Função para Palavras para Ads Filtradas (com KW Negativas Excluídas)
+# =============================================================================
+
+def criar_planilha_palavras_para_ads_filtradas(folder_name, combined_df):
+    print_status("Criando a planilha 'Palavras para Ads Filtradas.xlsx'...")
+
+    # Identificar a coluna de volume
+    volume_col = None
+    for col in combined_df.columns:
+        if "volume" in col.lower():
+            volume_col = col
+            break
+    if not volume_col:
+        print_status("Erro: Nenhuma coluna de volume encontrada no DataFrame!")
+        return None, None
+
+    # Lista de palavras negativas fornecida
+    kw_negativas = [
+        "joguinho", "jogar", "reclamação", "reclamacoes", "reclamaçao", "reclamaçoes", "reclamação", "reclamações",
+        "problema", "problemas", "tragedia", "olx", "tragedias", "tragédia", "reclameaqui", "acidente", "acidentes",
+        "devolucao", "devolucoes", "devoluçao", "devoluçoes", "devolução", "devoluções", "falso", "falsos",
+        "falsificado", "falsificados", "gratis", "grátis", "gratuito", "gratuitos", "de graça", "proibido",
+        "proibidos", "paraguay", "paraguai", "download", "baixar", "receita", "receitas", "ilegal", "quero ver",
+        "o que é", "destilaria", "testosterona", "mal", "mau", "vaga", "vagas", "emprego", "empregos",
+        "agência de empregos", "agência de emprego", "agencia de emprego", "agencie de empregos", "quanto ganha",
+        "curriculo", "currículo", "agência de empregos", "oferta de emprego", "mercadolivre", "mercado livre",
+        "acompanhantes", "afundar", "afundou", "aids", "boate", "crime", "drogas", "escravo", "hospital",
+        "incêndio", "incendio", "miséria", "naufragio", "naufrágio", "naufrágios", "pobreza", "pornô", "hentai",
+        "pdf", "pornozão", "pornografia", "prostituição", "sexo", "sexual", "sexy", "torrent", "violência",
+        "xvideos", "x videos", "airbnb", "tragédias", "jogo", "jogos", "defeito", "defeitos", "free", "game",
+        "games", "joguinhos", "VX case", "lente de contato", "wallpaper", "papel de parede", "Sailor", "Ramen",
+        "pior", "queixa", "fraude", "escândalo", "negativo", "lei", "legal", "legislação", "regra", "regulação",
+        "regulamento", "faq", "termos", "condições", "perguntas frequentes", "politica de privacidade", "ajuda",
+        "condições de venda", "guia de tamanhos", "estorno", "rejeição", "email", "garantia", "manual", "recolha",
+        "reembolso", "substituir", "substituição", "rma", "apoio", "amostras", "leilão", "passatempo", "revenda",
+        "segunda mão", "usado", "pode", "como", "o que", "quando", "onde", "quem", "porque", "carreira", "estágio",
+        "trabalho", "trabalhar", "recursos humanos", "gestor rh", "recrutamento", "cv", "freelancer", "aulas",
+        "cursos", "formação", "escola", "treino", "universidade", "faculdade", "especialização", "graduação",
+        "mestrado", "doutorado", "associação", "jornal", "revista", "métricas", "notícias", "investigação",
+        "review", "opinião", "estatísticas", "histórias", "tutorial", "definição", "significado", "sobre",
+        "relatorios", "especificações", "behance", "facebook", "flickr", "instagram", "linkedin", "meetup",
+        "messenger", "pinterest", "reddit", "snapchat", "soundcloud", "telegram", "tiktok", "tumblr", "twitter",
+        "vimeo", "valor", "salário", "média salarial", "o q é", "dói", "doi", "dor", "doer", "insuportável",
+        "quanto", "o que faz", "como faz", "como é", "apresentação", "presencial", "nome para", "quanto fatura",
+        "dá dinheiro", "oq faz", "0800", "de graca", "graça", "gratiz", "grátiz", "gratuita", "sem", "sem custo",
+        "sem pagar", "gratúitos", "gratúitas", "gratuítos", "gratuítas", "o que e", "oq e", "o q e", "pdf.",
+        "proposta comercial", "modelo", "frase", "frases", "foto", "fotos", "imagem", "imagens", "fotografia",
+        "fotografias", "vídeo", "video", "vídeos", "videos", "dica", "dicas", "antes", "depois", "antes e depois",
+        "www", "digulgação", "divulgacao", "divulgaçao", "divulgacão", "Custo zero", "Download gratuito",
+        "Versão gratuita", "Trial gratuito", "Demonstração gratuita", "Teste grátis", "Experimente grátis",
+        "Experimentar grátis", "catho", "cathu", "cato", "catu", "Consultora comercial", "Consultora de vendas",
+        "Consultores", "contratação", "curriculu", "curriculum", "curriculun", "entrevista", "estagios",
+        "estágios", "infojob", "infojobs", "jovem aprendis", "jovem aprendiz", "labuta", "Lista", "manager",
+        "ocupação", "oportunidade", "rio vagas", "riovagas", "Salario", "Salário", "Sandra mara", "sandramara",
+        "serviço", "servisso", "Telemarketing", "vitae", "Contrata", "Trabalhe", "Trabalhe conosco", "servico",
+        "Ganha", "Conosco", "Contratar", "auxiliar", "diretor", "supervisor", "gerente", "função", "funções",
+        "cargo", "cargos"
+    ]
+    # Remover duplicatas da lista
+    kw_negativas = list(set(kw_negativas))
+    print_status(f"{len(kw_negativas)} palavras negativas carregadas da lista interna")
+
+    # Garantir que "Keyword" seja string e tratar valores nulos
+    combined_df["Keyword"] = combined_df["Keyword"].fillna("").astype(str)
+
+    # Criar uma cópia do DataFrame original para trabalhar
+    df_inicial = combined_df.copy()
+
+    # Filtrar palavras que NÃO contenham termos negativos (Palavras Filtradas)
+    palavras_ads_filtradas = df_inicial[~df_inicial["Keyword"].str.lower().apply(
+        lambda x: any(negativa in x.lower() for negativa in kw_negativas)
+    )]
+
+    # Identificar palavras excluídas da lista inicial que CONTENHAM termos negativos
+    palavras_excluidas = df_inicial[df_inicial["Keyword"].str.lower().apply(
+        lambda x: any(negativa in x.lower() for negativa in kw_negativas)
+    )]
+
+    print_status(f"Palavras filtradas (não contêm negativas): {len(palavras_ads_filtradas)}")
+    print_status(f"Palavras excluídas negativadas (excluídas da lista inicial): {len(palavras_excluidas)}")
+
+    # Se não houver palavras filtradas, criar DataFrame vazio
+    if palavras_ads_filtradas.empty:
+        print_status("Aviso: Nenhuma palavra restante após exclusão de negativas!")
+        palavras_ads_filtradas = pd.DataFrame(columns=["Keyword", volume_col, "Intent", "SERP Features"])
+
+    # Se não houver palavras excluídas, criar DataFrame vazio
+    if palavras_excluidas.empty:
+        print_status("Aviso: Nenhuma palavra excluída encontrada na lista inicial!")
+        palavras_excluidas = pd.DataFrame(columns=["Keyword", volume_col, "Intent", "SERP Features"])
+
+    # Ordenar por volume (se disponível)
+    if volume_col in palavras_ads_filtradas.columns and not palavras_ads_filtradas[volume_col].dropna().empty:
+        palavras_ads_filtradas = palavras_ads_filtradas.sort_values(by=volume_col, ascending=False)
+    else:
+        palavras_ads_filtradas = palavras_ads_filtradas.sort_values(by="Keyword")
+
+    if volume_col in palavras_excluidas.columns and not palavras_excluidas[volume_col].dropna().empty:
+        palavras_excluidas = palavras_excluidas.sort_values(by=volume_col, ascending=False)
+    else:
+        palavras_excluidas = palavras_excluidas.sort_values(by="Keyword")
+
+    # Selecionar colunas relevantes
+    colunas_selecao = ["Keyword", volume_col, "Intent", "SERP Features"] if volume_col else ["Keyword", "Intent", "SERP Features"]
+
+    # Criar a planilha com duas abas
+    wb = Workbook()
+
+    # Aba 1: Palavras Filtradas
+    ws_filtradas = wb.active
+    ws_filtradas.title = "Palavras Filtradas"
+    for r in dataframe_to_rows(palavras_ads_filtradas[colunas_selecao], index=False, header=True):
+        ws_filtradas.append(r)
+    volume_col_index = get_column_index(ws_filtradas, volume_col) if volume_col else None
+    if volume_col_index and not palavras_ads_filtradas[volume_col].dropna().empty:
+        apply_heatmap(ws_filtradas, volume_col_index, palavras_ads_filtradas[volume_col])
+    apply_header_style(ws_filtradas)
+    apply_content_style(ws_filtradas)
+    adjust_column_width(ws_filtradas)
+
+    # Aba 2: Palavras Excluídas Negativadas
+    ws_excluidas = wb.create_sheet("Palavras Excluidas Negativadas")
+    for r in dataframe_to_rows(palavras_excluidas[colunas_selecao], index=False, header=True):
+        ws_excluidas.append(r)
+    volume_col_index = get_column_index(ws_excluidas, volume_col) if volume_col else None
+    if volume_col_index and not palavras_excluidas[volume_col].dropna().empty:
+        apply_heatmap(ws_excluidas, volume_col_index, palavras_excluidas[volume_col])
+    apply_header_style(ws_excluidas)
+    apply_content_style(ws_excluidas)
+    adjust_column_width(ws_excluidas)
+
+    # Salvar a planilha
+    output_path = os.path.join(folder_name, "Palavras para Ads Filtradas.xlsx")
+    wb.save(output_path)
+    print_status("Planilha 'Palavras para Ads Filtradas.xlsx' criada com sucesso!")
+    return palavras_ads_filtradas, palavras_excluidas
 
 # =============================================================================
 # Função para Criar Dashboard Profissional
 # =============================================================================
 
-def criar_dashboard_profissional(folder_name, combined_df, intent_counts, serp_counts, jornada_counts, ctr_export_df, estrategia_df, calculo_df, meses, volume_col, objective, now):
+def criar_dashboard_profissional(folder_name, combined_df, intent_counts, serp_counts, jornada_counts, ctr_export_df, estrategia_df, calculo_df, meses, volume_col, objective, now, ctr_rates):
     print_status("Criando Dashboard Profissional no Excel...")
 
     wb = Workbook()
@@ -653,8 +829,8 @@ def criar_dashboard_profissional(folder_name, combined_df, intent_counts, serp_c
         exemplo = ctr_export_df.iloc[0]
         ws['A41'] = f"Palavra: {exemplo['Keyword']}"
         ws.append(["Posição", "Cliques Mínimos", "Cliques Máximos"])
-        for pos in range(1, 11):
-            min_max = exemplo[f'Posicao {pos} ({int(ctr_rates[pos][0]*100)}%-{int(ctr_rates[pos][1]*100)}%)'].split('-')
+        for pos, (min_rate, max_rate) in ctr_rates.items():
+            min_max = exemplo[f'Posicao {pos} ({int(min_rate*100)}%-{int(max_rate*100)}%)'].split('-')
             ws.append([f"Posição {pos}", int(min_max[0]), int(min_max[1])])
         for row in range(41, 53):
             for col in ['A', 'B', 'C']:
@@ -730,6 +906,13 @@ now = datetime.now()
 folder_name = f"{project_name} {now.strftime('%d-%m-%Y')} {now.strftime('%H')} horas {now.strftime('%M')} minutos {now.strftime('%S')} segundos"
 os.makedirs(folder_name, exist_ok=True)
 print_status(f"Pasta de saída criada: {folder_name}")
+
+if not os.path.exists("cidades_brasil.xlsx"):
+    print_status("Erro: Arquivo 'cidades_brasil.xlsx' não encontrado!")
+    raise FileNotFoundError("Arquivo 'cidades_brasil.xlsx' necessário")
+if not os.path.exists("kw_negativas.docx"):
+    print_status("Erro: Arquivo 'kw_negativas.docx' não encontrado!")
+    raise FileNotFoundError("Arquivo 'kw_negativas.docx' necessário")
 
 use_gpt = input("[PERGUNTA] Deseja conectar à API do ChatGPT para assistência? (s/n): ").lower()
 if use_gpt == 's':
@@ -1031,10 +1214,7 @@ for i, (value, label) in enumerate(zip(jornada_values, [e for e in etapas if e i
 plt.savefig(os.path.join(folder_name, "jornada.png"))
 plt.close()
 
-# =============================================================================
-# Fase 5 – CTR por Posição
-# =============================================================================
-
+## Fase 5 – CTR por Posição
 print_status("Iniciando Fase 5: Calculando CTR por posição...")
 ctr_rates = {
     1: (0.25, 0.35), 2: (0.15, 0.20), 3: (0.10, 0.15), 4: (0.07, 0.10), 5: (0.05, 0.07),
@@ -1127,13 +1307,53 @@ top_palavras_por_tipo = criar_planilha_top_palavras_por_tipo(folder_name, combin
 print_status("Fase 8 concluída: Planilha 'Top 100 Palavras por Tipo.xlsx' gerada!")
 
 # =============================================================================
-# Fase 9 – Geração do Dashboard Profissional
+# Fase 8.5 – Palavras para Ads Filtradas
 # =============================================================================
+print_status("Iniciando Fase 8.5: Gerando palavras para Ads Filtradas...")
+palavras_ads_filtradas, palavras_excluidas = criar_planilha_palavras_para_ads_filtradas(folder_name, combined_df)
+print_status("Fase 8.5 concluída: Planilha 'Palavras para Ads Filtradas.xlsx' gerada!")
 
+# =============================================================================
+# Fase 9 – Geração do Dashboard Profissional
 print_status("Iniciando Fase 9: Gerando Dashboard Profissional...")
-criar_dashboard_profissional(folder_name, combined_df, intent_counts, serp_counts, jornada_counts, ctr_export_df, estrategia_df, calculo_df, meses, volume_col, objective, now)
+criar_dashboard_profissional(folder_name, combined_df, intent_counts, serp_counts, jornada_counts, ctr_export_df, estrategia_df, calculo_df, meses, volume_col, objective, now, ctr_rates)
 print_status("Fase 9 concluída: Dashboard.xlsx gerado!")
 
+def dict_to_xml(tag, d):
+    elem = ET.Element(tag)
+    for key, val in d.items():
+        # Garantir que a chave seja uma string válida para XML
+        key = re.sub(r'[^a-zA-Z0-9_]', '_', str(key))  # Substitui caracteres inválidos por '_'
+        
+        if isinstance(val, dict):
+            child = dict_to_xml(key, val)
+            elem.append(child)
+        elif isinstance(val, list):
+            for i, item in enumerate(val):
+                if isinstance(item, dict):
+                    child = dict_to_xml(key, item)
+                else:
+                    child = ET.Element(key)
+                    # Sanitizar completamente o texto
+                    safe_text = str(item)
+                    # Remover caracteres de controle e quaisquer caracteres inválidos para XML
+                    safe_text = ''.join(c for c in safe_text if 32 <= ord(c) <= 0x10FFFF and c not in '\x00-\x08\x0B\x0C\x0E-\x1F\x7F')
+                    # Escapar caracteres especiais XML
+                    safe_text = safe_text.encode('utf-8', errors='xmlcharrefreplace').decode('utf-8')
+                    child.text = safe_text if safe_text.strip() else ' '  # Garante texto não-vazio
+                elem.append(child)
+        else:
+            child = ET.Element(key)
+            # Sanitizar completamente o texto
+            safe_text = str(val)
+            # Remover caracteres de controle e quaisquer caracteres inválidos para XML
+            safe_text = ''.join(c for c in safe_text if 32 <= ord(c) <= 0x10FFFF and c not in '\x00-\x08\x0B\x0C\x0E-\x1F\x7F')
+            # Escapar caracteres especiais XML
+            safe_text = safe_text.encode('utf-8', errors='xmlcharrefreplace').decode('utf-8')
+            child.text = safe_text if safe_text.strip() else ' '  # Garante texto não-vazio
+            elem.append(child)
+    return elem    
+# Configuração Inicial e Criação da Pasta de Saída
 # =============================================================================
 # Geração do Relatório Analítico Detalhado
 # =============================================================================
@@ -1198,11 +1418,22 @@ add_image(doc, os.path.join(folder_name, "crescimento.png"))
 add_paragraph(doc, "Recomendações: Priorizar palavras selecionadas na aba 'Seleção de Palavras' e monitorar o progresso mensal.")
 
 add_subtitle(doc, "Fase 8: Top 100 Palavras por Tipo")
-add_paragraph(doc, "Objetivo: Identificar as 100 melhores palavras-chave por tipo de serviço com base no volume de busca.")
-add_paragraph(doc, "Método: Filtragem por regex para tipos predefinidos (ex.: desentupidora, encanador) e ordenação por volume.")
+add_paragraph(doc, "Objetivo: Identificar as 100 melhores palavras-chave por tipo com base no volume de busca.")
+add_paragraph(doc, "Método: Agrupamento por uma coluna de tipo (se disponível) ou clustering automático das palavras-chave.")
 if top_palavras_por_tipo:
-    add_paragraph(doc, f"Resultado: Tipos analisados: {', '.join(top_palavras_por_tipo.keys())}. Exemplo para 'desentupidora': '{top_palavras_por_tipo.get('desentupidora', pd.DataFrame()).iloc[0]['Keyword']}' (volume {top_palavras_por_tipo.get('desentupidora', pd.DataFrame()).iloc[0][volume_col]})" if 'desentupidora' in top_palavras_por_tipo else "Nenhum resultado para 'desentupidora'.")
+    primeiro_tipo = list(top_palavras_por_tipo.keys())[0]
+    exemplo_df = top_palavras_por_tipo[primeiro_tipo]
+    add_paragraph(doc, f"Resultado: Tipos analisados: {', '.join(top_palavras_por_tipo.keys())}. Exemplo para '{primeiro_tipo}': '{exemplo_df.iloc[0]['Keyword']}' (volume {exemplo_df.iloc[0][volume_col]}).")
     add_paragraph(doc, "Recomendações: Focar em palavras de alto volume por tipo para campanhas segmentadas.")
+else:
+    add_paragraph(doc, "Resultado: Nenhum tipo identificado devido a dados insuficientes.")
+
+# Adicionar a Fase 8.5 aqui
+add_subtitle(doc, "Fase 8.5: Palavras para Ads Filtradas")
+add_paragraph(doc, "Objetivo: Filtrar palavras-chave adequadas para campanhas de anúncios, excluindo termos negativos listados em 'kw_negativas.docx'.")
+add_paragraph(doc, "Método: Leitura de palavras negativas de um arquivo Word, exclusão de palavras contendo esses termos e separação em duas abas: 'Palavras Filtradas' e 'Palavras Excluídas'.")
+add_paragraph(doc, f"Resultado: {len(palavras_ads_filtradas)} palavras filtradas e {len(palavras_excluidas)} excluídas.")
+add_paragraph(doc, "Recomendações: Usar as palavras filtradas para campanhas de anúncios e revisar as excluídas para ajustes na lista de negativas.")
 
 add_subtitle(doc, "Fase 9: Dashboard Profissional")
 add_paragraph(doc, "Objetivo: Criar um dashboard interativo no Excel para visualização consolidada dos principais insights.")
@@ -1216,72 +1447,58 @@ add_paragraph(doc, f"A análise do projeto {project_name} oferece insights estra
 doc.save(os.path.join(folder_name, "Relatório Analítico Detalhado.docx"))
 print_status("Relatório Analítico Detalhado.docx gerado com sucesso na pasta " + folder_name)
 
-# =============================================================================
 # Geração do XML
-# =============================================================================
-
 print_status("Gerando resultados_finais.xml...")
-
-def dict_to_xml(tag, d):
-    elem = ET.Element(tag)
-    for key, val in d.items():
-        if isinstance(val, dict):
-            child = dict_to_xml(key, val)
-            elem.append(child)
-        elif isinstance(val, list):
-            for i, item in enumerate(val):
-                if isinstance(item, dict):
-                    child = dict_to_xml(key, item)
-                else:
-                    child = ET.Element(key)
-                    child.text = str(item)
-                elem.append(child)
-        else:
-            child = ET.Element(key)
-            child.text = str(val)
-            elem.append(child)
-    return elem
-
 resultados = {
-    "Visao_Geral": {
-        "total_palavras": len(combined_df),
-        "top_palavras": combined_df.head(10)[['Keyword', volume_col, 'Intent']].to_dict(orient='records') if volume_col else []
+    "Projeto": project_name,
+    "Data": now.strftime('%d-%m-%Y %H:%M:%S'),
+    "Objetivo": objective,
+    "Fase1": {
+        "TotalPalavras": len(combined_df),
+        "VolumeMedio": round(combined_df[volume_col].mean(), 2) if volume_col and not combined_df[volume_col].dropna().empty else "N/A"
     },
-    "Intents": {
-        intent: {
-            "count": intent_counts.get(intent, 0),
-            "exemplo": combined_df[combined_df['Intent'].str.contains(intent, case=False, na=False)]['Keyword'].iloc[0] if intent_counts.get(intent, 0) > 0 and not combined_df[combined_df['Intent'].str.contains(intent, case=False, na=False)].empty else ""
-        } for intent in intents
+    "Fase2": intent_counts,
+    "Fase3": serp_counts,
+    "Fase4": jornada_counts,
+    "Fase5": {
+        "ExemploCTR": {
+            "Keyword": exemplo_ctr['Keyword'],
+            "Volume": exemplo_ctr[volume_col] if volume_col else "N/A"
+        } if not ctr_export_df.empty else "Nenhum dado"
     },
-    "SERP_Features": {feature: {"count": count} for feature, count in serp_counts.items()},
-    "Jornada": {
-        etapa: {
-            "count": jornada_counts.get(etapa, 0),
-            "tipologia": combined_df[combined_df['Etapa da Jornada'] == etapa]['Tipologia Sugerida'].iloc[0] if jornada_counts.get(etapa, 0) > 0 and not combined_df[combined_df['Etapa da Jornada'] == etapa].empty else ""
-        } for etapa in etapas
+    "Fase6": {
+        "ObjetivoSelecionado": objetivo_selecionado,
+        "Exemplo": {
+            "Palavra": estrategia_df.iloc[0]['Palavra-chave'],
+            "Volume": estrategia_df.iloc[0]['Volume'],
+            "Estrategia": estrategia_df.iloc[0]['Estratégia']
+        }
     },
-    "CTR_por_Posicao": {
-        "exemplo_palavra": ctr_export_df.iloc[0].to_dict() if not ctr_export_df.empty else {}
+    "Fase7": {
+        "VolumeAtual": volume_atual,
+        "CrescimentoMensal": crescimento_mensal,
+        "MesesPlanejamento": meses_planejamento
     },
-    "Palavras_por_Estrategia": {
-        objetivo_selecionado: estrategia_df.head(5).to_dict(orient='records')
+    "Fase8": {
+        "Tipos": {tipo: len(df) for tipo, df in top_palavras_por_tipo.items()}
     },
-    "Planejamento_Crescimento": {
-        "calculo": calculo_df.to_dict(orient='records'),
-        "selecao_palavras": {f"Mes_{i+1}": mes.to_dict(orient='records') for i, mes in enumerate(meses)},
-        "cauda_curta": {"count": len(cauda_curta), "exemplo": cauda_curta.head(1).to_dict(orient='records') if not cauda_curta.empty else []},
-        "cauda_media": {"count": len(cauda_media), "exemplo": cauda_media.head(1).to_dict(orient='records') if not cauda_media.empty else []},
-        "cauda_longa": {"count": len(cauda_longa), "exemplo": cauda_longa.head(1).to_dict(orient='records') if not cauda_longa.empty else []},
-        "grupos_semanticos": palavras_semantico.groupby("Grupo Semântico").apply(lambda x: x[colunas_selecao].head(5).to_dict(orient='records')).to_dict() if not palavras_semantico.empty else {},
-        "palavras_blog": palavras_blog.head(5).to_dict(orient='records') if not palavras_blog.empty else []
+    "Fase8_5": {
+        "PalavrasFiltradas": len(palavras_ads_filtradas),
+        "PalavrasExcluidas": len(palavras_excluidas)
     },
-    "Top_Palavras_por_Tipo": {tipo: df.to_dict(orient='records') for tipo, df in top_palavras_por_tipo.items()} if top_palavras_por_tipo else {}
+    "Fase9": "Dashboard gerado"
 }
 
 root = dict_to_xml("Resultados", resultados)
 xml_str = ET.tostring(root, encoding='utf-8', method='xml')
-pretty_xml = minidom.parseString(xml_str).toprettyxml(indent="  ")
+
+try:
+    pretty_xml = minidom.parseString(xml_str).toprettyxml(indent="  ")
+except Exception as e:
+    print_status(f"Erro ao formatar XML: {str(e)}. Salvando versão bruta.")
+    pretty_xml = xml_str.decode('utf-8')
 
 with open(os.path.join(folder_name, "resultados_finais.xml"), "w", encoding="utf-8") as xml_file:
     xml_file.write(pretty_xml)
 print_status("resultados_finais.xml gerado com sucesso na pasta " + folder_name)
+print_status("Obrigado por usar o script do Consultor SEO Anderson Melo!")
