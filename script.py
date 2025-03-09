@@ -896,6 +896,297 @@ def criar_dashboard_profissional(folder_name, combined_df, intent_counts, serp_c
     wb.save(os.path.join(folder_name, "Dashboard.xlsx"))
     print_status("Dashboard.xlsx gerado com sucesso!")
     
+def criar_planilha_entidades_e_knowledge(folder_name, combined_df):
+    print_status("Criando a planilha 'Entidades e Knowledge.xlsx'...")
+
+    # Encontrar a coluna de volume (ex.: "Volume" ou "Search Volume")
+    volume_col = None
+    for col in combined_df.columns:
+        if "volume" in col.lower():
+            volume_col = col
+            break
+    if not volume_col:
+        print_status("Erro: Não achei uma coluna de volume!")
+        return None
+
+    # Garantir que a coluna "Keyword" não tenha valores vazios
+    combined_df["Keyword"] = combined_df["Keyword"].fillna("").astype(str)
+
+    # Lista de entidades com palavras-chave relacionadas
+    entidades = {
+        "Person": ["pessoa", "autor", "escritor", "ator", "presidente", "ceo"],
+        "Organization": ["empresa", "organização", "instituição", "startup"],
+        "Location": ["cidade", "estado", "país", "região"],
+        "Event": ["evento", "festival", "conferência", "jogo"],
+        "Work of Art": ["livro", "filme", "música", "arte"],
+        "Product": ["produto", "serviço", "software", "app"],
+        "Consumer Goods": ["roupa", "eletrônico", "gadget"],
+        "Other": [],  # Para palavras que não encaixam em nada
+        "Date": ["data", "ano", "mês", "dia"],
+        "Number": ["número", "quantidade", "total"],
+        "Address": ["endereço", "rua", "avenida", "cep"],
+        "Phone Number": ["telefone", "celular", "contato"],
+        "Brand": ["marca", "fabricante", "logo"],
+        "Species": ["animal", "planta", "espécie"],
+        "Language": ["idioma", "língua", "dialeto"],
+        "Disease": ["doença", "vírus", "sintoma"],
+        "Historical Period": ["era", "século", "história"],
+        "Movie": ["filme", "cinema", "série"],
+        "Book": ["livro", "revista", "publicação"],
+        "Song": ["música", "canção", "álbum"],
+        "Sports Team": ["time", "equipe", "clube"],
+        "Government Organization": ["governo", "ministério", "agência"]
+    }
+
+    # Criar um dicionário para guardar as palavras de cada entidade
+    palavras_por_entidade = {entidade: [] for entidade in entidades}
+
+    # Dividir as palavras entre as entidades
+    for index, row in combined_df.iterrows():
+        keyword = row["Keyword"].lower()
+        achou = False
+        for entidade, palavras_chave in entidades.items():
+            if entidade == "Other":
+                continue
+            if any(palavra in keyword for palavra in palavras_chave):
+                palavras_por_entidade[entidade].append(row)
+                achou = True
+                break
+        if not achou:
+            palavras_por_entidade["Other"].append(row)
+
+    # Criar a planilha
+    wb = Workbook()
+    ws_dashboard = wb.active
+    ws_dashboard.title = "Dashboard"
+
+    # --- Fazendo o Dashboard ---
+    # Estilos simples
+    borda = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+    fundo_cabecalho = PatternFill(start_color="000066", end_color="000066", fill_type="solid")
+    fundo_secao = PatternFill(start_color="E6F0FA", end_color="E6F0FA", fill_type="solid")
+
+    # Título do Dashboard
+    ws_dashboard['A1'] = "Dashboard de Entidades e Knowledge"
+    ws_dashboard['A1'].font = Font(size=16, bold=True, color="FFFFFF")
+    ws_dashboard['A1'].fill = fundo_cabecalho
+    ws_dashboard.merge_cells('A1:F1')
+    ws_dashboard['A1'].alignment = Alignment(horizontal="center")
+
+    # Resumo Geral
+    ws_dashboard['A3'] = "Resumo Geral"
+    ws_dashboard['A3'].font = Font(size=14, bold=True)
+    ws_dashboard['A3'].fill = fundo_secao
+    resumo = [
+        ["Total de Palavras", len(combined_df)],
+        ["Entidades com Palavras", len([e for e in palavras_por_entidade if palavras_por_entidade[e]])],
+        ["Volume Total", combined_df[volume_col].sum()]
+    ]
+    for i, (nome, valor) in enumerate(resumo, start=4):
+        ws_dashboard[f'A{i}'] = nome
+        ws_dashboard[f'B{i}'] = valor
+        ws_dashboard[f'A{i}'].font = Font(bold=True)
+        ws_dashboard[f'B{i}'].alignment = Alignment(horizontal="center")
+        ws_dashboard[f'A{i}'].border = borda
+        ws_dashboard[f'B{i}'].border = borda
+
+    # Tabela de Distribuição por Entidade
+    ws_dashboard['A8'] = "Quantidade por Entidade"
+    ws_dashboard['A8'].font = Font(size=14, bold=True)
+    ws_dashboard['A8'].fill = fundo_secao
+    ws_dashboard.append(["Entidade", "Quantidade"])
+    linha = 10
+    for entidade, linhas in palavras_por_entidade.items():
+        if linhas:
+            ws_dashboard.append([entidade, len(linhas)])
+            ws_dashboard[f'A{linha}'].border = borda
+            ws_dashboard[f'B{linha}'].border = borda
+            linha += 1
+    ws_dashboard['A9'].font = Font(bold=True)
+    ws_dashboard['B9'].font = Font(bold=True)
+
+    # Gráfico de Pizza Simples
+    pie = PieChart()
+    labels = Reference(ws_dashboard, min_col=1, min_row=10, max_row=linha-1)
+    data = Reference(ws_dashboard, min_col=2, min_row=9, max_row=linha-1)
+    pie.add_data(data, titles_from_data=True)
+    pie.set_categories(labels)
+    pie.title = "Distribuição por Entidade"
+    pie.dataLabels = DataLabelList()
+    pie.dataLabels.showPercent = True
+    ws_dashboard.add_chart(pie, "D8")
+
+    apply_header_style(ws_dashboard)
+    apply_content_style(ws_dashboard)
+    adjust_column_width(ws_dashboard)
+
+    # --- Abas para Cada Entidade ---
+    for entidade, linhas in palavras_por_entidade.items():
+        if not linhas:
+            continue
+        entidade_df = pd.DataFrame(linhas)
+        ws = wb.create_sheet(entidade[:31])  # Nome curto por causa do limite do Excel
+        colunas = ["Keyword", volume_col, "Intent", "SERP Features"]
+        entidade_df = entidade_df[colunas].sort_values(by=volume_col, ascending=False)
+        for r in dataframe_to_rows(entidade_df, index=False, header=True):
+            ws.append(r)
+        volume_col_index = get_column_index(ws, volume_col)
+        if volume_col_index and not entidade_df[volume_col].dropna().empty:
+            apply_heatmap(ws, volume_col_index, entidade_df[volume_col])
+        apply_header_style(ws)
+        apply_content_style(ws)
+        adjust_column_width(ws)
+
+    # Salvar a planilha
+    caminho = os.path.join(folder_name, "Entidades e Knowledge.xlsx")
+    wb.save(caminho)
+    print_status("Planilha 'Entidades e Knowledge.xlsx' criada com sucesso!")
+    return palavras_por_entidade
+    
+    # Encontrar a coluna de volume (ex.: "Volume" ou "Search Volume")
+    volume_col = None
+    for col in combined_df.columns:
+        if "volume" in col.lower():
+            volume_col = col
+            break
+    if not volume_col:
+        print_status("Erro: Não achei uma coluna de volume!")
+        return None
+
+    # Garantir que a coluna "Keyword" não tenha valores vazios
+    combined_df["Keyword"] = combined_df["Keyword"].fillna("").astype(str)
+
+    # Lista de entidades com palavras-chave relacionadas
+    entidades = {
+        "Person": ["pessoa", "autor", "escritor", "ator", "presidente", "ceo"],
+        "Organization": ["empresa", "organização", "instituição", "startup"],
+        "Location": ["cidade", "estado", "país", "região"],
+        "Event": ["evento", "festival", "conferência", "jogo"],
+        "Work of Art": ["livro", "filme", "música", "arte"],
+        "Product": ["produto", "serviço", "software", "app"],
+        "Consumer Goods": ["roupa", "eletrônico", "gadget"],
+        "Other": [],  # Para palavras que não encaixam em nada
+        "Date": ["data", "ano", "mês", "dia"],
+        "Number": ["número", "quantidade", "total"],
+        "Address": ["endereço", "rua", "avenida", "cep"],
+        "Phone Number": ["telefone", "celular", "contato"],
+        "Brand": ["marca", "fabricante", "logo"],
+        "Species": ["animal", "planta", "espécie"],
+        "Language": ["idioma", "língua", "dialeto"],
+        "Disease": ["doença", "vírus", "sintoma"],
+        "Historical Period": ["era", "século", "história"],
+        "Movie": ["filme", "cinema", "série"],
+        "Book": ["livro", "revista", "publicação"],
+        "Song": ["música", "canção", "álbum"],
+        "Sports Team": ["time", "equipe", "clube"],
+        "Government Organization": ["governo", "ministério", "agência"]
+    }
+
+    # Criar um dicionário para guardar as palavras de cada entidade
+    palavras_por_entidade = {entidade: [] for entidade in entidades}
+
+    # Dividir as palavras entre as entidades
+    for index, row in combined_df.iterrows():
+        keyword = row["Keyword"].lower()
+        achou = False
+        for entidade, palavras_chave in entidades.items():
+            if entidade == "Other":
+                continue
+            if any(palavra in keyword for palavra in palavras_chave):
+                palavras_por_entidade[entidade].append(row)
+                achou = True
+                break
+        if not achou:
+            palavras_por_entidade["Other"].append(row)
+
+    # Criar a planilha
+    wb = Workbook()
+    ws_dashboard = wb.active
+    ws_dashboard.title = "Dashboard"
+
+    # --- Fazendo o Dashboard ---
+    # Estilos simples
+    borda = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+    fundo_cabecalho = PatternFill(start_color="000066", end_color="000066", fill_type="solid")
+    fundo_secao = PatternFill(start_color="E6F0FA", end_color="E6F0FA", fill_type="solid")
+
+    # Título do Dashboard
+    ws_dashboard['A1'] = "Dashboard de Entidades e Knowledge"
+    ws_dashboard['A1'].font = Font(size=16, bold=True, color="FFFFFF")
+    ws_dashboard['A1'].fill = fundo_cabecalho
+    ws_dashboard.merge_cells('A1:F1')
+    ws_dashboard['A1'].alignment = Alignment(horizontal="center")
+
+    # Resumo Geral
+    ws_dashboard['A3'] = "Resumo Geral"
+    ws_dashboard['A3'].font = Font(size=14, bold=True)
+    ws_dashboard['A3'].fill = fundo_secao
+    resumo = [
+        ["Total de Palavras", len(combined_df)],
+        ["Entidades com Palavras", len([e for e in palavras_por_entidade if palavras_por_entidade[e]])],
+        ["Volume Total", combined_df[volume_col].sum()]
+    ]
+    for i, (nome, valor) in enumerate(resumo, start=4):
+        ws_dashboard[f'A{i}'] = nome
+        ws_dashboard[f'B{i}'] = valor
+        ws_dashboard[f'A{i}'].font = Font(bold=True)
+        ws_dashboard[f'B{i}'].alignment = Alignment(horizontal="center")
+        ws_dashboard[f'A{i}'].border = borda
+        ws_dashboard[f'B{i}'].border = borda
+
+    # Tabela de Distribuição por Entidade
+    ws_dashboard['A8'] = "Quantidade por Entidade"
+    ws_dashboard['A8'].font = Font(size=14, bold=True)
+    ws_dashboard['A8'].fill = fundo_secao
+    ws_dashboard.append(["Entidade", "Quantidade"])
+    linha = 10
+    for entidade, linhas in palavras_por_entidade.items():
+        if linhas:
+            ws_dashboard.append([entidade, len(linhas)])
+            ws_dashboard[f'A{linha}'].border = borda
+            ws_dashboard[f'B{linha}'].border = borda
+            linha += 1
+    ws_dashboard['A9'].font = Font(bold=True)
+    ws_dashboard['B9'].font = Font(bold=True)
+
+    # Gráfico de Pizza Simples
+    pie = PieChart()
+    labels = Reference(ws_dashboard, min_col=1, min_row=10, max_row=linha-1)
+    data = Reference(ws_dashboard, min_col=2, min_row=9, max_row=linha-1)
+    pie.add_data(data, titles_from_data=True)
+    pie.set_categories(labels)
+    pie.title = "Distribuição por Entidade"
+    pie.dataLabels = DataLabelList()
+    pie.dataLabels.showPercent = True
+    ws_dashboard.add_chart(pie, "D8")
+
+    apply_header_style(ws_dashboard)
+    apply_content_style(ws_dashboard)
+    adjust_column_width(ws_dashboard)
+
+    # --- Abas para Cada Entidade ---
+    for entidade, linhas in palavras_por_entidade.items():
+        if not linhas:
+            continue
+        entidade_df = pd.DataFrame(linhas)
+        ws = wb.create_sheet(entidade[:31])  # Nome curto por causa do limite do Excel
+        colunas = ["Keyword", volume_col, "Intent", "SERP Features"]
+        entidade_df = entidade_df[colunas].sort_values(by=volume_col, ascending=False)
+        for r in dataframe_to_rows(entidade_df, index=False, header=True):
+            ws.append(r)
+        volume_col_index = get_column_index(ws, volume_col)
+        if volume_col_index and not entidade_df[volume_col].dropna().empty:
+            apply_heatmap(ws, volume_col_index, entidade_df[volume_col])
+        apply_header_style(ws)
+        apply_content_style(ws)
+        adjust_column_width(ws)
+
+    # Salvar a planilha
+    caminho = os.path.join(folder_name, "Entidades e Knowledge.xlsx")
+    wb.save(caminho)
+    print_status("Planilha 'Entidades e Knowledge.xlsx' criada com sucesso!")
+    return palavras_por_entidade
+    
     # Nova função movida para cá
 def criar_planilha_palavras_por_entidades(folder_name, combined_df):
     print_status("Criando a planilha 'Palavras por Entidades.xlsx'...")
@@ -1409,7 +1700,10 @@ print_status("Iniciando Fase 8.5: Gerando palavras para Ads Filtradas...")
 palavras_ads_filtradas, palavras_excluidas = criar_planilha_palavras_para_ads_filtradas(folder_name, combined_df)
 print_status("Fase 8.5 concluída: Planilha 'Palavras para Ads Filtradas.xlsx' gerada!")
 
-
+# Fase 8.7 – Entidades e Knowledge
+print_status("Iniciando Fase 8.7: Gerando Entidades e Knowledge...")
+palavras_por_entidade_knowledge = criar_planilha_entidades_e_knowledge(folder_name, combined_df)
+print_status("Fase 8.7 concluída: Planilha 'Entidades e Knowledge.xlsx' gerada!")
 # =============================================================================
 # Fase 9 – Geração do Dashboard Profissional
 print_status("Iniciando Fase 9: Gerando Dashboard Profissional...")
