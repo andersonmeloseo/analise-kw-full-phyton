@@ -895,6 +895,102 @@ def criar_dashboard_profissional(folder_name, combined_df, intent_counts, serp_c
     # Salvar o dashboard
     wb.save(os.path.join(folder_name, "Dashboard.xlsx"))
     print_status("Dashboard.xlsx gerado com sucesso!")
+    
+    # Nova função movida para cá
+def criar_planilha_palavras_por_entidades(folder_name, combined_df):
+    print_status("Criando a planilha 'Palavras por Entidades.xlsx'...")
+
+    # Identificar a coluna de volume dinamicamente
+    volume_col = None
+    for col in combined_df.columns:
+        if "volume" in col.lower():
+            volume_col = col
+            break
+    if not volume_col:
+        print_status("Erro: Nenhuma coluna de volume encontrada no DataFrame!")
+        return None
+
+    # Garantir que "Keyword" seja string e tratar valores nulos
+    combined_df["Keyword"] = combined_df["Keyword"].fillna("").astype(str)
+
+    # Lista de entidades combinada (Google Cloud Natural Language API + Knowledge Graph)
+    entidades = {
+        "Person": ["pessoa", "nome", "autor", "escritor", "ator", "presidente", "ceo"],
+        "Organization": ["empresa", "organização", "corporação", "instituição", "startup"],
+        "Location": ["cidade", "estado", "país", "local", "região", "endereço"],
+        "Event": ["evento", "festival", "conferência", "jogo", "competição"],
+        "Work of Art": ["obra", "arte", "livro", "filme", "música", "pintura"],
+        "Product": ["produto", "serviço", "item", "software", "aplicativo"],
+        "Consumer Goods": ["bem", "consumo", "roupa", "eletrônico", "gadget"],
+        "Other": [],  # Coringa, pega o que não se encaixa nas outras
+        "Date": ["data", "ano", "mês", "dia", "época"],
+        "Number": ["número", "quantidade", "total", "contagem"],
+        "Address": ["endereço", "rua", "avenida", "cep", "bairro"],
+        "Phone Number": ["telefone", "celular", "número de telefone", "contato"],
+        "Brand": ["marca", "fabricante", "logo", "empresa"],
+        "Species": ["espécie", "animal", "planta", "raça"],
+        "Language": ["idioma", "língua", "dialeto", "fala"],
+        "Disease": ["doença", "saúde", "vírus", "sintoma"],
+        "Historical Period": ["período", "era", "século", "história"],
+        "Movie": ["filme", "cinema", "documentário", "série"],
+        "Book": ["livro", "publicação", "revista", "autor"],
+        "Song": ["música", "canção", "álbum", "artista"],
+        "Sports Team": ["time", "equipe", "clube", "esporte"],
+        "Government Organization": ["governo", "ministério", "departamento", "agência"]
+    }
+
+    # Criar dicionário para armazenar palavras por entidade
+    palavras_por_entidade = {entidade: [] for entidade in entidades.keys()}
+
+    # Associar palavras-chave às entidades
+    for idx, row in combined_df.iterrows():
+        keyword = row["Keyword"].lower()
+        matched = False
+        for entidade, termos_relacionados in entidades.items():
+            if entidade == "Other":  # "Other" será preenchido depois
+                continue
+            # Verificar se algum termo relacionado aparece na palavra-chave
+            if any(termo in keyword for termo in termos_relacionados):
+                palavras_por_entidade[entidade].append(row)
+                matched = True
+                break
+        # Se não houver correspondência, vai para "Other"
+        if not matched:
+            palavras_por_entidade["Other"].append(row)
+
+    # Criar a planilha
+    wb = Workbook()
+
+    # Para cada entidade, criar uma aba
+    for entidade, linhas in palavras_por_entidade.items():
+        if not linhas:  # Pular se não houver palavras para a entidade
+            continue
+        entidade_df = pd.DataFrame(linhas)
+        ws = wb.create_sheet(entidade[:31])  # Limitar a 31 caracteres (limite do Excel)
+        colunas_selecao = ["Keyword", volume_col, "Intent", "SERP Features"] if volume_col in entidade_df.columns else ["Keyword", "Intent", "SERP Features"]
+        entidade_df = entidade_df[colunas_selecao].sort_values(by=volume_col, ascending=False) if volume_col in entidade_df.columns else entidade_df[colunas_selecao].sort_values(by="Keyword")
+        
+        for r in dataframe_to_rows(entidade_df, index=False, header=True):
+            ws.append(r)
+        
+        volume_col_index = get_column_index(ws, volume_col) if volume_col in entidade_df.columns else None
+        if volume_col_index and not entidade_df[volume_col].dropna().empty:
+            apply_heatmap(ws, volume_col_index, entidade_df[volume_col])
+        
+        apply_header_style(ws)
+        apply_content_style(ws)
+        adjust_column_width(ws)
+
+    # Remover a aba padrão "Sheet" se existir
+    if "Sheet" in wb.sheetnames:
+        wb.remove(wb["Sheet"])
+
+    # Salvar a planilha
+    output_path = os.path.join(folder_name, "Palavras por Entidades.xlsx")
+    wb.save(output_path)
+    print_status("Planilha 'Palavras por Entidades.xlsx' criada com sucesso!")
+    return palavras_por_entidade
+    
 
 # =============================================================================
 # Configuração Inicial e Criação da Pasta de Saída
@@ -1313,6 +1409,7 @@ print_status("Iniciando Fase 8.5: Gerando palavras para Ads Filtradas...")
 palavras_ads_filtradas, palavras_excluidas = criar_planilha_palavras_para_ads_filtradas(folder_name, combined_df)
 print_status("Fase 8.5 concluída: Planilha 'Palavras para Ads Filtradas.xlsx' gerada!")
 
+
 # =============================================================================
 # Fase 9 – Geração do Dashboard Profissional
 print_status("Iniciando Fase 9: Gerando Dashboard Profissional...")
@@ -1352,7 +1449,15 @@ def dict_to_xml(tag, d):
             safe_text = safe_text.encode('utf-8', errors='xmlcharrefreplace').decode('utf-8')
             child.text = safe_text if safe_text.strip() else ' '  # Garante texto não-vazio
             elem.append(child)
-    return elem    
+    return elem
+    
+def criar_planilha_palavras_por_entidades(folder_name, combined_df):
+    print_status("Criando a planilha 'Palavras por Entidades.xlsx'...")
+    # (o resto da função conforme acima)
+    print_status("Planilha 'Palavras por Entidades.xlsx' criada com sucesso!")
+    return palavras_por_entidade
+
+
 # Configuração Inicial e Criação da Pasta de Saída
 # =============================================================================
 # Geração do Relatório Analítico Detalhado
